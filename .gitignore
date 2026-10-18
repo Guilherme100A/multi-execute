@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.maestri/
+accounts.json
+data/
+logs/
+findings/*
+!findings/.gitkeep

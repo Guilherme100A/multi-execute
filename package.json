@@ -1,0 +1,17 @@
+{
+  "name": "authorized-roblox-pipeline",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/src/index.js",
+    "dev": "tsx --env-file-if-exists=.env src/index.ts",
+    "batch": "tsx --env-file-if-exists=.env src/batch.ts",
+    "test": "tsx --test test/*.test.ts",
+    "check": "npm run build && npm test"
+  },
+  "dependencies": { "express": "^5.1.0" },
+  "devDependencies": { "@types/express": "^5.0.3", "@types/node": "^24.0.0", "tsx": "^4.20.0", "typescript": "^5.9.0" }
+}
