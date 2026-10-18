@@ -22,6 +22,13 @@
     </section>
 
     <main id="dashboard" hidden>
+      <nav class="app-nav" aria-label="Navegação principal">
+        <button type="button" class="nav-button active" data-view="home">Início</button>
+        <button type="button" class="nav-button" data-view="sessions">Sessões <span id="navSessionCount">0</span></button>
+        <button type="button" class="nav-button" data-view="console">Console</button>
+      </nav>
+
+      <div id="homeView" class="view">
       <section class="launch card">
         <div><p class="label">NOVA SESSÃO</p><h2>Abrir jogo</h2><button id="accountsToggle" type="button" class="ghost compact">Gerenciar contas</button></div>
         <form id="launchForm">
@@ -54,13 +61,16 @@
         </div>
         <p id="accountMessage" class="message"></p>
       </section>
+      </div>
 
-      <div class="workspace">
+      <div id="sessionsView" class="view" hidden>
         <section class="sessions card">
           <div class="section-title"><div><p class="label">WORKERS</p><h2>Sessões</h2></div><span id="sessionCount" class="count">0</span></div>
           <div id="sessions" class="session-list"></div>
         </section>
+      </div>
 
+      <div id="consoleView" class="view" hidden>
         <section class="terminal card">
           <div class="terminal-head">
             <div><p class="label">AGENTE</p><h2>Console de análise</h2></div>

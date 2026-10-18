@@ -3,6 +3,11 @@ let token = sessionStorage.getItem('pipeline-token') || '';
 let selected = null;
 let lastRuns = '';
 
+function showView(name) {
+  for (const view of ['home','sessions','console']) $(`${view}View`).hidden = view !== name;
+  document.querySelectorAll('.nav-button').forEach(button => button.classList.toggle('active', button.dataset.view === name));
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.body ? { 'content-type': 'application/json' } : {}), ...options.headers } });
   const body = await response.json().catch(() => ({}));
@@ -53,7 +58,7 @@ function sessionCard(row) {
     retry.onclick = async event => { event.stopPropagation(); await api(`/sessions/${row.id}/retry`, { method:'POST' }); await refresh(); };
     card.append(retry);
   }
-  card.onclick = () => { selected = row.id; refresh().catch(showFatal); };
+  card.onclick = () => { selected = row.id; showView('console'); refresh().catch(showFatal); };
   return card;
 }
 
@@ -79,6 +84,7 @@ async function refresh() {
   $('healthDot').className=`dot ${status.mcp_online ? 'online':'offline'}`;
   $('healthText').textContent=status.mcp_online ? 'MCP online' : 'MCP offline · fila pausada';
   $('sessionCount').textContent=String(status.sessions.length);
+  $('navSessionCount').textContent=String(status.sessions.length);
   if (selected && !status.sessions.some(row => row.id === selected)) selected=null;
   if (status.sessions.length) $('sessions').replaceChildren(...status.sessions.map(sessionCard));
   else { const empty=document.createElement('div'); empty.className='sessions-empty'; empty.textContent='Nenhuma sessão criada. Adicione uma conta e abra um jogo.'; $('sessions').replaceChildren(empty); }
@@ -87,9 +93,10 @@ async function refresh() {
 
 function showFatal(error) { $('healthDot').className='dot offline'; $('healthText').textContent=error.message; }
 $('loginForm').onsubmit = async event => { event.preventDefault(); token=$('token').value.trim(); try { await connect(); sessionStorage.setItem('pipeline-token',token); } catch(error) { $('loginError').textContent=error.message; } };
-$('launchForm').onsubmit = async event => { event.preventDefault(); $('launchButton').disabled=true; $('launchMessage').textContent=''; try { const data=await api('/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links:[$('game').value.trim()]})}); selected=data.sessions[0]?.session?.id || selected; $('launchMessage').textContent='Sessão adicionada à fila.'; $('game').value=''; await refresh(); } catch(error) { $('launchMessage').textContent=error.message; } finally { $('launchButton').disabled=false; } };
+$('launchForm').onsubmit = async event => { event.preventDefault(); $('launchButton').disabled=true; $('launchMessage').textContent=''; try { const data=await api('/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links:[$('game').value.trim()]})}); selected=data.sessions[0]?.session?.id || selected; $('launchMessage').textContent='Sessão adicionada à fila.'; $('game').value=''; await refresh(); showView('sessions'); } catch(error) { $('launchMessage').textContent=error.message; } finally { $('launchButton').disabled=false; } };
 $('promptForm').onsubmit = async event => { event.preventDefault(); $('promptError').textContent=''; $('sendPrompt').disabled=true; try { await api('/prompts',{method:'POST',body:JSON.stringify({prompt:$('prompt').value.trim(),scope:$('broadcast').checked?'all':'session',session_id:selected})}); $('prompt').value=''; await refresh(); } catch(error) { $('promptError').textContent=error.message; } finally { $('sendPrompt').disabled=false; } };
 $('broadcast').onchange=()=>refresh().catch(showFatal);
+document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>showView(button.dataset.view));
 $('accountsToggle').onclick=async()=>{ $('accountManager').hidden=false; await refreshRam(); };
 $('accountsClose').onclick=()=>{ $('accountManager').hidden=true; };
 $('policyToggle').onclick=async()=>{ $('policyEditor').hidden=!$('policyEditor').hidden; if (!$('policyEditor').hidden) await loadPolicy(); };
