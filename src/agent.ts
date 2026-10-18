@@ -25,12 +25,12 @@ export class AgentRunner {
     }));
   }
 
-  async run(workerId: string, prompt: string): Promise<string> {
+  async run(workerId: string, prompt: string, sharedInstructions = ''): Promise<string> {
     if (!this.client) throw new Error('OPENAI_API_KEY is not configured');
     const tools = this.functionTools(await this.mcp.tools());
     if (!tools.length) throw new Error('MCP returned no allowed tools');
     const input: unknown[] = [{ role: 'user', content: prompt }];
-    const instructions = `Você é um analista de segurança de jogos Roblox próprios ou formalmente autorizados. Use somente as ferramentas fornecidas e somente a sessão ${workerId}. Nunca invente resultados. Não tente evasão, persistência fora do set-autoexecute, acesso a credenciais ou ações em outras sessões. Explique evidências e limites em português.`;
+    const instructions = `Você é um analista de segurança de jogos Roblox próprios ou formalmente autorizados. Use somente as ferramentas fornecidas e somente a sessão ${workerId}. Nunca invente resultados. Não tente evasão, persistência fora do set-autoexecute, acesso a credenciais ou ações em outras sessões. Explique evidências e limites em português.${sharedInstructions ? `\n\nInstruções globais fornecidas pelo operador em AGENTS.md:\n<agents_md>\n${sharedInstructions}\n</agents_md>` : ''}`;
 
     for (let turn = 0; turn < 12; turn++) {
       const response = await this.client.responses.create({

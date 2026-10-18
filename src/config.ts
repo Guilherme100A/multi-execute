@@ -38,10 +38,11 @@ export function loadConfig(env = process.env) {
   if (mcpUrl !== 'http://127.0.0.1:28429') throw new Error('MCP_URL must match the loader: http://127.0.0.1:28429');
   const ramPassword = env.RAM_PASSWORD ?? '';
   if (ramPassword && ramPassword.length < 6) throw new Error('RAM_PASSWORD must be empty or at least 6 characters');
+  const accountsFile = resolve(env.ACCOUNTS_FILE ?? 'accounts.json');
   return {
     host, port, token, callbackToken, autoexecToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
     ramPassword, mcpToken: env.MCP_TOKEN ?? '',
-    accounts: parseAccounts(JSON.parse(readFileSync(resolve(env.ACCOUNTS_FILE ?? 'accounts.json'), 'utf8')) as unknown),
+    accountsFile, accounts: parseAccounts(JSON.parse(readFileSync(accountsFile, 'utf8')) as unknown),
     databaseFile: resolve(env.DB_PATH ?? env.DATABASE_FILE ?? 'data/sessions.sqlite'),
     logDirectory: resolve(env.LOG_DIRECTORY ?? 'logs'), findingsDirectory: resolve(env.FINDINGS_DIRECTORY ?? 'findings'),
     healthIntervalMs: integer('HEALTH_CHECK_INTERVAL_MS', 30_000, 1_000, 3_600_000),

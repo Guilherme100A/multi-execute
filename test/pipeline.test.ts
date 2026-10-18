@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store, ConflictError } from '../src/store.js';
@@ -14,6 +14,7 @@ import { makeProjectRealAutoexec } from '../src/project-real.js';
 import { runBatch } from '../src/batch.js';
 import { loadConfig } from '../src/config.js';
 import type { AgentRunner } from '../src/agent.js';
+import { AccountRegistry } from '../src/account-registry.js';
 
 const log = { info() {}, error() {} };
 const accounts = [
@@ -267,6 +268,23 @@ test('RAM uses encoded query, 10s deadline, 3 total attempts and bounded backoff
   await assert.rejects(() => fail.launch('test', '123456'), /timeout/); assert.equal(failedCalls, 3);
 });
 
+test('RAM lists accounts and imports a cookie once without exposing it in errors', async () => {
+  const urls: URL[] = [];
+  const ram = new RamClient(new HttpClient('http://127.0.0.1:7963', '', async input => {
+    const url = new URL(String(input)); urls.push(url);
+    if (url.pathname === '/v2/GetAccounts') return Response.json({ Success: true, Message: 'AlphaUser,BetaUser' });
+    return Response.json({ Success: true, Message: 'Cookie successfully imported' });
+  }), 'ram-password');
+  assert.deepEqual(await ram.accounts(), ['AlphaUser', 'BetaUser']);
+  const cookie = 'sensitive-cookie-value-1234567890';
+  await ram.importCookie(cookie);
+  assert.equal(urls[1]!.pathname, '/v2/ImportCookie');
+  assert.equal(urls[1]!.searchParams.get('Cookie'), cookie);
+  assert.equal(urls[1]!.searchParams.get('Password'), 'ram-password');
+  await assert.rejects(() => ram.importCookie('short'), /Invalid Roblox security cookie/);
+  assert.equal(urls.length, 2);
+});
+
 test('MCP validates real camelCase contracts and forwards tool execution', async () => {
   const requests: { path: string; body: unknown }[] = [];
   const mcp = new McpClient(new HttpClient('http://127.0.0.1:28429', 'upstream-secret', async (input, init) => {
@@ -336,10 +354,11 @@ test('prompt console persists one isolated run per connected worker', async () =
   const seen: string[] = [];
   const fakeAgent = {
     configured: true, model: 'test-model',
-    async run(workerId: string, prompt: string) { seen.push(`${workerId}:${prompt}`); return `ok:${workerId}`; },
+    async run(workerId: string, prompt: string, shared: string) { seen.push(`${workerId}:${prompt}:${shared}`); return `ok:${workerId}`; },
   } as unknown as AgentRunner;
   const one = f.store.create('123456', '123456', 'alpha').session;
   const two = f.store.create('123456', '123456', 'beta').session;
+  f.store.setAgentPolicy('AGENTS.md', '# Shared policy');
   for (const row of [one, two]) { f.store.transition(row.id, 'launching'); f.store.transition(row.id, 'connected', null, `worker:${row.worker_id}`); }
   const server = createApp(f.pipeline, token, callbackToken, autoexecToken, 'findings', log, fakeAgent, accounts).listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
@@ -354,9 +373,41 @@ test('prompt console persists one isolated run per connected worker', async () =
     assert.equal(f.store.prompts().length, 2);
     assert.ok(f.store.prompts().every(run => run.status === 'done' && run.response === `ok:${run.worker_id}`));
     assert.equal(seen.length, 2);
+    assert.ok(seen.every(value => value.endsWith(':# Shared policy')));
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve()));
     await f.pipeline.stop(); f.store.close();
+  }
+});
+
+test('account management imports into RAM and persists only the username mapping', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pipeline-accounts-'));
+  const file = join(dir, 'accounts.json');
+  const managed = [{ ...accounts[0]! }];
+  writeFileSync(file, JSON.stringify(managed));
+  const registry = new AccountRegistry(file, managed);
+  let remote = ['AlphaUser']; let receivedCookie = '';
+  const ram = {
+    async accounts() { return [...remote]; },
+    async importCookie(cookie: string) { receivedCookie = cookie; remote = [...remote, 'NewUser']; },
+  };
+  const f = fixture();
+  const server = createApp(f.pipeline, token, callbackToken, autoexecToken, dir, log, undefined, managed, registry, ram).listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const addr = server.address(); assert.ok(addr && typeof addr === 'object');
+  const cookie = 'temporary-cookie-value-1234567890';
+  try {
+    const response = await fetch(`http://127.0.0.1:${addr.port}/accounts/import`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ alias: 'new-account', cookie }),
+    });
+    assert.equal(response.status, 201); assert.equal(receivedCookie, cookie);
+    assert.equal(managed[1]!.robloxUsername, 'NewUser');
+    const persisted = readFileSync(file, 'utf8');
+    assert.match(persisted, /NewUser/); assert.ok(!persisted.includes(cookie));
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await f.pipeline.stop(); f.store.close(); rmSync(dir, { recursive: true, force: true });
   }
 });
 

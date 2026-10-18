@@ -5,17 +5,20 @@ import { RotatingLogger } from './logger.js';
 import { Pipeline } from './pipeline.js';
 import { Store } from './store.js';
 import { AgentRunner } from './agent.js';
+import { AccountRegistry } from './account-registry.js';
 
 const config = loadConfig();
 const log = new RotatingLogger(config.logDirectory);
 const store = new Store(config.databaseFile);
 const mcp = new McpClient(new HttpClient(config.mcpUrl, config.mcpToken));
+const ram = new RamClient(new HttpClient(config.ramUrl), config.ramPassword, undefined, config.maxRetries, config.retryBaseDelayMs);
+const accountRegistry = new AccountRegistry(config.accountsFile, config.accounts);
 const pipeline = new Pipeline(store,
-  new RamClient(new HttpClient(config.ramUrl), config.ramPassword, undefined, config.maxRetries, config.retryBaseDelayMs),
+  ram,
   mcp,
   config.accounts, config.authorized, log, Date.now, config.healthIntervalMs, config.launchTimeoutMs, config.injectionMode);
 const agent = new AgentRunner(config.openaiApiKey, config.openaiModel, mcp);
-const server = createApp(pipeline, config.token, config.callbackToken, config.autoexecToken, config.findingsDirectory, log, agent, config.accounts).listen(config.port, config.host, () => {
+const server = createApp(pipeline, config.token, config.callbackToken, config.autoexecToken, config.findingsDirectory, log, agent, config.accounts, accountRegistry, ram).listen(config.port, config.host, () => {
   log.info('server_started', { host: config.host, port: config.port });
   console.log(`Authorized pipeline: http://${config.host}:${config.port}`);
   pipeline.start();

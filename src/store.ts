@@ -15,6 +15,7 @@ export interface PromptRun {
   id: string; session_id: string; worker_id: string; prompt: string; status: PromptStatus;
   response: string | null; error: string | null; created_at: number; updated_at: number;
 }
+export interface AgentPolicy { filename: string; content: string; updated_at: number }
 const transitions: Record<Status, Status[]> = {
   pending: ['launching', 'failed'], launching: ['connected', 'failed'],
   connected: ['analyzing', 'failed', 'disconnected'], analyzing: ['done', 'failed', 'disconnected'],
@@ -49,6 +50,9 @@ export class Store {
         response TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS prompt_runs_created ON prompt_runs(created_at DESC);`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS agent_policy (
+      id INTEGER PRIMARY KEY CHECK(id=1), filename TEXT NOT NULL, content TEXT NOT NULL, updated_at INTEGER NOT NULL
+    );`);
   }
   get(id: string): Session | undefined { return this.db.prepare('SELECT * FROM sessions WHERE id=?').get(id) as Session | undefined; }
   all(): Session[] { return this.db.prepare('SELECT * FROM sessions ORDER BY created_at,rowid').all() as unknown as Session[]; }
@@ -116,6 +120,15 @@ export class Store {
     const result = this.db.prepare('UPDATE prompt_runs SET status=?,response=?,error=?,updated_at=? WHERE id=?').run(status, response, error, this.now(), id);
     if (!result.changes) throw new ConflictError('Unknown prompt run');
     return this.db.prepare('SELECT * FROM prompt_runs WHERE id=?').get(id) as unknown as PromptRun;
+  }
+  agentPolicy(): AgentPolicy | undefined {
+    return this.db.prepare('SELECT filename,content,updated_at FROM agent_policy WHERE id=1').get() as unknown as AgentPolicy | undefined;
+  }
+  setAgentPolicy(filename: string, content: string): AgentPolicy {
+    this.db.prepare(`INSERT INTO agent_policy(id,filename,content,updated_at) VALUES(1,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET filename=excluded.filename,content=excluded.content,updated_at=excluded.updated_at`)
+      .run(filename, content, this.now());
+    return this.agentPolicy()!;
   }
   close(): void { this.db.close(); }
 }

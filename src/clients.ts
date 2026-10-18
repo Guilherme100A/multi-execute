@@ -35,6 +35,28 @@ export class RamClient {
       }
     }
   }
+  private params(values: Record<string, string>): URLSearchParams {
+    const params = new URLSearchParams(values);
+    if (this.password) params.set('Password', this.password);
+    return params;
+  }
+  private result(value: unknown, operation: string): string {
+    if (!value || typeof value !== 'object') throw new Error(`Invalid RAM ${operation} response`);
+    const row = value as Record<string, unknown>;
+    if (row.Success !== true || typeof row.Message !== 'string') throw new Error(`RAM ${operation} failed: ${String(row.Message ?? 'unknown error')}`);
+    return row.Message;
+  }
+  async accounts(): Promise<string[]> {
+    const message = this.result(await this.http.request(`/v2/GetAccounts?${this.params({})}`), 'GetAccounts');
+    if (!message.trim()) return [];
+    const accounts = message.split(',').map(value => value.trim()).filter(Boolean);
+    if (accounts.some(value => !/^[A-Za-z0-9_]{3,20}$/.test(value))) throw new Error('RAM returned an invalid username');
+    return [...new Set(accounts)];
+  }
+  async importCookie(cookie: string): Promise<void> {
+    if (typeof cookie !== 'string' || cookie.length < 20 || cookie.length > 4096 || /[\r\n]/.test(cookie)) throw new Error('Invalid Roblox security cookie');
+    this.result(await this.http.request(`/v2/ImportCookie?${this.params({ Cookie: cookie })}`), 'ImportCookie');
+  }
 }
 export interface McpSession { id: string; instanceId: string; workerId?: string; status?: string; pid?: string; accountAlias?: string; placeId?: string }
 export interface McpProcess { instanceId: string; workerId?: string }

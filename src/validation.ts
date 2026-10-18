@@ -20,7 +20,7 @@ export function aliasValue(input: unknown): string {
 
 export interface Account { alias: string; ramAccount: string; robloxUsername: string }
 export function parseAccounts(value: unknown): Account[] {
-  if (!Array.isArray(value) || !value.length) throw new InputError('accounts.json must be a nonempty array');
+  if (!Array.isArray(value)) throw new InputError('accounts.json must be an array');
   const seen = new Set<string>();
   return value.map((raw: unknown) => {
     if (!raw || typeof raw !== 'object') throw new InputError('Invalid account entry');

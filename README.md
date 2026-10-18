@@ -59,6 +59,8 @@ O contrato foi alinhado ao código do RAM de referência:
 
 - habilite **Developer Mode / Web Server**;
 - habilite **Allow LaunchAccount Method**;
+- habilite **Allow GetAccounts Method** para o gerenciamento pela interface;
+- habilite **Every Request Requires Password**;
 - mantenha o servidor em `127.0.0.1`;
 - porta padrão: `7963`;
 - configure uma Webserver Password com pelo menos 6 caracteres e copie para `RAM_PASSWORD`;
@@ -84,9 +86,13 @@ O arquivo gerado contém `AUTOEXEC_TOKEN`, por isso é ignorado pelo Git. Ele es
 Abra `http://127.0.0.1:3000`. A interface pede `PIPELINE_TOKEN` e guarda o valor apenas em `sessionStorage` da aba.
 
 - **Abrir jogo:** escolha uma conta e informe URL ou PlaceId.
+- **Gerenciar contas:** sincronize contas existentes no RAM ou importe uma nova conta sem editar JSON manualmente.
 - **Sessões:** acompanhe os estados e use retry quando permitido.
 - **Console:** selecione uma sessão conectada ou marque “Enviar para todas conectadas”.
+- **AGENTS.md global:** carregue instruções Markdown aplicadas a todas as sessões.
 - **Histórico:** prompts, respostas e erros ficam persistidos no SQLite.
+
+Na importação, o cookie de sessão passa uma única vez pelo Launcher e segue diretamente para o RAM local. O Launcher não o grava nem registra e não repete a chamada automaticamente. O RAM necessariamente persiste esse cookie no próprio armazenamento de contas. Mantenha o RAM restrito a loopback e nunca compartilhe o cookie.
 
 Para interpretar prompts, configure `OPENAI_API_KEY`. O padrão é `OPENAI_MODEL=gpt-6.1-sol`, escolhido para equilibrar qualidade, latência e custo. O agente usa a Responses API com function calling; as ferramentas são executadas localmente por `POST /api/tools/execute`. O Launcher sempre sobrescreve `workerId`, impedindo que o modelo redirecione uma chamada para outra sessão. Sem chave, lançamento e monitoramento continuam funcionando e o console informa que o agente não está configurado.
 
@@ -136,6 +142,11 @@ Todos os endpoints abaixo exigem `Authorization: Bearer <PIPELINE_TOKEN>`, excet
 | `POST /sessions/:id/retry` | Um único retry para failed/disconnected |
 | `GET /prompts` | Histórico persistido do console |
 | `POST /prompts` | `{ prompt, scope: "session", session_id }` ou `{ prompt, scope: "all" }` |
+| `GET /accounts/ram` | Lista usernames já cadastrados no RAM |
+| `POST /accounts/sync` | Adiciona uma conta existente do RAM ao Launcher |
+| `POST /accounts/import` | Importa cookie no RAM e persiste somente alias/username no Launcher |
+| `GET /agent-policy` | Retorna o AGENTS.md global persistido |
+| `POST /agent-policy` | Salva Markdown global de até 64 KiB |
 | `POST /internal/autoexec/register` | Registro autenticado do bootstrap Project Real |
 | `POST /internal/sessions/:id/analyzing` | Callback do controlador de análise |
 | `POST /internal/sessions/:id/done` | Callback final e findings opcionais |

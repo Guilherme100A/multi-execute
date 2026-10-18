@@ -4,13 +4,16 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Pipeline } from './pipeline.js';
 import { ConflictError } from './store.js';
-import { InputError } from './validation.js';
+import { aliasValue, InputError } from './validation.js';
 import type { Logger } from './logger.js';
 import type { AgentRunner } from './agent.js';
 import type { Account } from './validation.js';
+import type { AccountRegistry } from './account-registry.js';
+import type { RamClient } from './clients.js';
 
 export function createApp(pipeline: Pipeline, token: string, callbackToken: string, autoexecToken: string,
-  findings: string, log: Logger, agent?: AgentRunner, accounts: Account[] = []) {
+  findings: string, log: Logger, agent?: AgentRunner, accounts: Account[] = [], accountRegistry?: AccountRegistry,
+  ramAccounts?: Pick<RamClient, 'accounts' | 'importCookie'>) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.static(resolve('public'), { index: 'index.html', fallthrough: true }));
@@ -27,7 +30,60 @@ export function createApp(pipeline: Pipeline, token: string, callbackToken: stri
     agent: { configured: agent?.configured ?? false, model: agent?.model ?? null },
   }));
   app.get('/status', (_req, res) => res.json({ mcp_online: pipeline.online, queue_paused: !pipeline.online, sessions: pipeline.store.all() }));
+  app.get('/accounts/ram', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!ramAccounts) { res.status(503).json({ error: 'RAM account management is unavailable' }); return; }
+    try { res.json({ accounts: await ramAccounts.accounts() }); }
+    catch (error) { res.status(502).json({ error: error instanceof Error ? error.message : String(error) }); }
+  });
+  app.post('/accounts/sync', async (req, res) => {
+    if (!ramAccounts || !accountRegistry) { res.status(503).json({ error: 'RAM account management is unavailable' }); return; }
+    try {
+      const alias = aliasValue(req.body?.alias);
+      const remote = await ramAccounts.accounts();
+      const username = remote.find(value => value.toLowerCase() === String(req.body?.username ?? '').toLowerCase());
+      if (!username) throw new InputError('Account does not exist in RAM');
+      const account = accountRegistry.add(alias, username);
+      log.info('ram_account_mapped', { alias: account.alias, username });
+      res.status(201).json({ account });
+    } catch (error) {
+      if (error instanceof InputError || error instanceof ConflictError) throw error;
+      res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post('/accounts/import', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${req.headers.host}`) { res.status(403).json({ error: 'Invalid origin' }); return; }
+    if (!ramAccounts || !accountRegistry) { res.status(503).json({ error: 'RAM account management is unavailable' }); return; }
+    try {
+      const alias = aliasValue(req.body?.alias);
+      if (accounts.some(account => account.alias.toLowerCase() === alias.toLowerCase())) throw new ConflictError('Account alias is already configured');
+      const before = await ramAccounts.accounts();
+      await ramAccounts.importCookie(req.body?.cookie);
+      const after = await ramAccounts.accounts();
+      const previous = new Set(before.map(value => value.toLowerCase()));
+      const added = after.filter(value => !previous.has(value.toLowerCase()));
+      if (added.length !== 1) throw new ConflictError('RAM imported the cookie, but a unique new account was not detected; use Sync existing account');
+      const account = accountRegistry.add(alias, added[0]!);
+      log.info('ram_account_imported', { alias: account.alias, username: added[0] });
+      res.status(201).json({ account });
+    } catch (error) {
+      if (error instanceof InputError || error instanceof ConflictError) throw error;
+      res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
   app.get('/prompts', (_req, res) => res.json({ runs: pipeline.store.prompts() }));
+  app.get('/agent-policy', (_req, res) => res.json({ policy: pipeline.store.agentPolicy() ?? null }));
+  app.post('/agent-policy', (req, res) => {
+    const filename = req.body?.filename;
+    const content = req.body?.content;
+    if (typeof filename !== 'string' || !/^[A-Za-z0-9_.-]{1,100}\.md$/i.test(filename)) throw new InputError('filename must be a Markdown file');
+    if (typeof content !== 'string' || !content.trim() || Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new InputError('AGENTS.md must contain 1–65536 UTF-8 bytes');
+    const policy = pipeline.store.setAgentPolicy(filename, content);
+    log.info('agent_policy_updated', { filename, bytes: Buffer.byteLength(content, 'utf8') });
+    res.json({ policy });
+  });
   app.post('/prompts', (req, res) => {
     if (!agent?.configured) throw new InputError('Configure OPENAI_API_KEY to use the prompt console');
     const prompt = req.body?.prompt;
@@ -39,7 +95,7 @@ export function createApp(pipeline: Pipeline, token: string, callbackToken: stri
     for (const run of runs) void (async () => {
       pipeline.store.updatePrompt(run.id, 'running');
       try {
-        const output = await agent.run(run.worker_id, run.prompt);
+        const output = await agent.run(run.worker_id, run.prompt, pipeline.store.agentPolicy()?.content ?? '');
         pipeline.store.updatePrompt(run.id, 'done', output);
       } catch (error) {
         pipeline.store.updatePrompt(run.id, 'failed', null, error instanceof Error ? error.message : String(error));

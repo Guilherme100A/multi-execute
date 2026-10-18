@@ -23,13 +23,36 @@
 
     <main id="dashboard" hidden>
       <section class="launch card">
-        <div><p class="label">NOVA SESSÃO</p><h2>Abrir jogo</h2></div>
+        <div><p class="label">NOVA SESSÃO</p><h2>Abrir jogo</h2><button id="accountsToggle" type="button" class="ghost compact">Gerenciar contas</button></div>
         <form id="launchForm">
           <label>Conta<select id="account" required></select></label>
           <label class="wide">Link ou PlaceId<input id="game" placeholder="https://www.roblox.com/games/123456789" required></label>
           <button id="launchButton">Iniciar</button>
         </form>
         <p id="launchMessage" class="message"></p>
+      </section>
+
+      <section id="accountManager" class="accounts-panel card" hidden>
+        <div class="section-title">
+          <div><p class="label">ROBLOX ACCOUNT MANAGER</p><h2>Adicionar conta</h2></div>
+          <button id="accountsClose" type="button" class="ghost">Fechar</button>
+        </div>
+        <p class="muted account-note">O Launcher conversa apenas com o RAM local. Cookies usados na importação não são gravados pelo nosso app.</p>
+        <div class="account-grid">
+          <form id="syncAccountForm" class="account-form">
+            <div><p class="label">JÁ ESTÁ NO RAM</p><h3>Sincronizar conta</h3></div>
+            <label>Conta encontrada<select id="ramAccount" required></select></label>
+            <label>Nome dentro do Launcher<input id="syncAlias" placeholder="conta-principal" required></label>
+            <button>Adicionar ao Launcher</button>
+          </form>
+          <form id="importAccountForm" class="account-form sensitive">
+            <div><p class="label">NOVA NO RAM</p><h3>Importar com cookie</h3></div>
+            <label>Nome dentro do Launcher<input id="importAlias" placeholder="conta-teste" required></label>
+            <label>Cookie de sessão Roblox<input id="securityCookie" type="password" autocomplete="off" placeholder="_ | WARNING:-DO-NOT-SHARE-THIS..." required></label>
+            <button>Importar no RAM</button>
+          </form>
+        </div>
+        <p id="accountMessage" class="message"></p>
       </section>
 
       <div class="workspace">
@@ -41,8 +64,17 @@
         <section class="terminal card">
           <div class="terminal-head">
             <div><p class="label">AGENTE</p><h2>Console de análise</h2></div>
-            <span id="model" class="model"></span>
+            <div class="terminal-badges"><button id="policyToggle" type="button" class="ghost compact">AGENTS.md global</button><span id="model" class="model"></span></div>
           </div>
+          <form id="policyEditor" class="policy-editor" hidden>
+            <div class="policy-row">
+              <label class="file-picker">Selecionar arquivo Markdown<input id="policyFile" type="file" accept=".md,text/markdown,text/plain"></label>
+              <span id="policyFilename" class="muted">Nenhum arquivo salvo</span>
+              <button type="submit">Salvar para todas as sessões</button>
+            </div>
+            <textarea id="policyContent" rows="8" maxlength="65536" placeholder="# AGENTS.md&#10;&#10;Instruções compartilhadas para todas as sessões…"></textarea>
+            <p id="policyMessage" class="message"></p>
+          </form>
           <div id="terminalOutput" class="terminal-output"><p class="hint">Selecione uma sessão conectada e envie uma instrução.</p></div>
           <form id="promptForm" class="prompt-form">
             <textarea id="prompt" rows="3" maxlength="8000" placeholder="Ex.: liste os remotes e identifique validações que precisam ser reforçadas" required></textarea>

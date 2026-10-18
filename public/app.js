@@ -11,11 +11,31 @@ async function api(path, options = {}) {
 }
 
 async function connect() {
-  const config = await api('/config');
-  $('account').replaceChildren(...config.accounts.map(row => new Option(`${row.alias} (${row.username})`, row.alias)));
+  const config = await loadConfig();
   $('model').textContent = config.agent.configured ? config.agent.model : 'OPENAI NÃO CONFIGURADA';
   $('login').hidden = true; $('dashboard').hidden = false;
   await refresh();
+}
+
+async function loadConfig() {
+  const config = await api('/config');
+  $('account').replaceChildren(...config.accounts.map(row => new Option(`${row.alias} (${row.username})`, row.alias)));
+  return config;
+}
+
+async function refreshRam() {
+  $('accountMessage').textContent = 'Consultando o RAM local…';
+  try {
+    const data = await api('/accounts/ram');
+    $('ramAccount').replaceChildren(...data.accounts.map(username => new Option(username, username)));
+    $('accountMessage').textContent = data.accounts.length ? `${data.accounts.length} conta(s) encontrada(s) no RAM.` : 'Nenhuma conta encontrada no RAM.';
+  } catch (error) { $('accountMessage').textContent = error.message; }
+}
+
+async function loadPolicy() {
+  const data = await api('/agent-policy');
+  $('policyFilename').textContent = data.policy ? `${data.policy.filename} · salvo globalmente` : 'Nenhum arquivo salvo';
+  $('policyContent').value = data.policy?.content || '';
 }
 
 function sessionCard(row) {
@@ -60,7 +80,8 @@ async function refresh() {
   $('healthText').textContent=status.mcp_online ? 'MCP online' : 'MCP offline · fila pausada';
   $('sessionCount').textContent=String(status.sessions.length);
   if (selected && !status.sessions.some(row => row.id === selected)) selected=null;
-  $('sessions').replaceChildren(...status.sessions.map(sessionCard));
+  if (status.sessions.length) $('sessions').replaceChildren(...status.sessions.map(sessionCard));
+  else { const empty=document.createElement('div'); empty.className='sessions-empty'; empty.textContent='Nenhuma sessão criada. Adicione uma conta e abra um jogo.'; $('sessions').replaceChildren(empty); }
   renderRuns(prompts.runs.filter(run => $('broadcast').checked || !selected || run.session_id === selected));
 }
 
@@ -69,5 +90,12 @@ $('loginForm').onsubmit = async event => { event.preventDefault(); token=$('toke
 $('launchForm').onsubmit = async event => { event.preventDefault(); $('launchButton').disabled=true; $('launchMessage').textContent=''; try { const data=await api('/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links:[$('game').value.trim()]})}); selected=data.sessions[0]?.session?.id || selected; $('launchMessage').textContent='Sessão adicionada à fila.'; $('game').value=''; await refresh(); } catch(error) { $('launchMessage').textContent=error.message; } finally { $('launchButton').disabled=false; } };
 $('promptForm').onsubmit = async event => { event.preventDefault(); $('promptError').textContent=''; $('sendPrompt').disabled=true; try { await api('/prompts',{method:'POST',body:JSON.stringify({prompt:$('prompt').value.trim(),scope:$('broadcast').checked?'all':'session',session_id:selected})}); $('prompt').value=''; await refresh(); } catch(error) { $('promptError').textContent=error.message; } finally { $('sendPrompt').disabled=false; } };
 $('broadcast').onchange=()=>refresh().catch(showFatal);
+$('accountsToggle').onclick=async()=>{ $('accountManager').hidden=false; await refreshRam(); };
+$('accountsClose').onclick=()=>{ $('accountManager').hidden=true; };
+$('policyToggle').onclick=async()=>{ $('policyEditor').hidden=!$('policyEditor').hidden; if (!$('policyEditor').hidden) await loadPolicy(); };
+$('policyFile').onchange=async()=>{ const file=$('policyFile').files[0]; if (!file) return; if (file.size>65536) { $('policyMessage').textContent='O arquivo excede 64 KiB.'; return; } $('policyContent').value=await file.text(); $('policyFilename').textContent=file.name; };
+$('policyEditor').onsubmit=async event=>{ event.preventDefault(); const file=$('policyFile').files[0]; const filename=file?.name || ($('policyFilename').textContent.split(' ·')[0] || 'AGENTS.md'); try { const data=await api('/agent-policy',{method:'POST',body:JSON.stringify({filename,content:$('policyContent').value})}); $('policyFilename').textContent=`${data.policy.filename} · salvo globalmente`; $('policyMessage').textContent='Instruções aplicadas a todas as sessões.'; } catch(error) { $('policyMessage').textContent=error.message; } };
+$('syncAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent=''; try { await api('/accounts/sync',{method:'POST',body:JSON.stringify({alias:$('syncAlias').value.trim(),username:$('ramAccount').value})}); $('syncAlias').value=''; await loadConfig(); $('accountMessage').textContent='Conta adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
+$('importAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent='Importando no RAM local…'; const cookie=$('securityCookie').value; $('securityCookie').value=''; try { await api('/accounts/import',{method:'POST',body:JSON.stringify({alias:$('importAlias').value.trim(),cookie})}); $('importAlias').value=''; await loadConfig(); await refreshRam(); $('accountMessage').textContent='Conta importada no RAM e adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
 if (token) connect().catch(() => { sessionStorage.removeItem('pipeline-token'); token=''; });
 setInterval(() => { if (!$('dashboard').hidden) refresh().catch(showFatal); }, 2000);
