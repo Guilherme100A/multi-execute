@@ -10,27 +10,34 @@ import { HttpClient, McpClient, RamClient, type McpSession } from '../src/client
 import { createApp } from '../src/app.js';
 import { RotatingLogger } from '../src/logger.js';
 import { makeLoader } from '../src/loader.js';
+import { makeProjectRealAutoexec } from '../src/project-real.js';
 import { runBatch } from '../src/batch.js';
 import { loadConfig } from '../src/config.js';
+import type { AgentRunner } from '../src/agent.js';
 
 const log = { info() {}, error() {} };
-const accounts = [{ alias: 'alpha', ramAccount: 'RAM Alpha' }, { alias: 'beta', ramAccount: 'RAM Beta' }];
+const accounts = [
+  { alias: 'alpha', ramAccount: 'RAM Alpha', robloxUsername: 'AlphaUser' },
+  { alias: 'beta', ramAccount: 'RAM Beta', robloxUsername: 'BetaUser' },
+];
 const token = 'test-secret-abcdefghijklmnopqrstuvwxyz';
 const callbackToken = 'callback-secret-abcdefghijklmnopqrstuvwxyz';
+const autoexecToken = 'autoexec-secret-abcdefghijklmnopqrstuvwxyz';
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function fixture(now = Date.now, store = new Store(':memory:', now)) {
+function fixture(now = Date.now, store = new Store(':memory:', now), injectionMode: 'project-real-autoexec' | 'mcp-execute' = 'mcp-execute') {
   let available = true;
   let sessions: McpSession[] = [];
   let processes: { instanceId: string }[] = [];
-  const launches: string[][] = [], executions: string[][] = [];
+  const launches: string[][] = [], executions: string[][] = [], toolCalls: { name: string; args: Record<string, unknown> }[] = [];
   const mcp = {
     async health() { if (!available) throw new Error('offline'); },
     async sessions() { return sessions; },
     async processes() { return processes; },
     async execute(id: string, script: string) { executions.push([id, script]); },
+    async callTool(name: string, args: Record<string, unknown>) { toolCalls.push({ name, args }); return { success: true }; },
   };
-  const pipeline = new Pipeline(store, { async launch(account, place) { launches.push([account, place]); } }, mcp, accounts, new Set(['123456', '654321']), log, now);
-  return { store, pipeline, launches, executions, mcp,
+  const pipeline = new Pipeline(store, { async launch(account, place) { launches.push([account, place]); } }, mcp, accounts, new Set(['123456', '654321']), log, now, 30_000, 60_000, injectionMode);
+  return { store, pipeline, launches, executions, toolCalls, mcp,
     offline(value: boolean) { available = !value; },
     live(rows: McpSession[]) { sessions = rows; processes = rows.map(row => ({ instanceId: row.instanceId })); },
     processes(rows: { instanceId: string }[]) { processes = rows; },
@@ -46,7 +53,7 @@ test('PlaceId accepts only 6–15 digits or exact Roblox game URLs', () => {
 test('account configuration rejects duplicate aliases and missing RAM mappings', () => {
   assert.deepEqual(parseAccounts(accounts), accounts);
   assert.throws(() => parseAccounts([accounts[0], accounts[0]]));
-  assert.throws(() => parseAccounts([{ alias: '../x', ramAccount: 'foo' }]));
+  assert.throws(() => parseAccounts([{ alias: '../x', ramAccount: 'foo', robloxUsername: 'ValidUser' }]));
   assert.throws(() => parseAccounts([{ alias: 'foo' }]));
 });
 
@@ -179,6 +186,24 @@ test('monitor matches alias/place/process and executes at most once', async () =
   } finally { await f.pipeline.stop(); f.store.close(); }
 });
 
+test('Project Real mode connects only after Auto-Execute registers the exact worker and never calls MCP execute', async () => {
+  const f = fixture(Date.now, new Store(':memory:'), 'project-real-autoexec');
+  try {
+    const row = f.pipeline.launch(['123456'], 'alpha')[0]!.session;
+    await f.pipeline.tick(); await flush();
+    assert.equal(f.store.get(row.id)!.status, 'launching');
+    assert.equal(f.pipeline.registerAutoexec('AlphaUser', '123456').worker_id, row.worker_id);
+    f.live([{ id: 'real-mcp-session', instanceId: 'real-client-1', workerId: 'wrong-worker' }]);
+    await f.pipeline.tick();
+    assert.equal(f.store.get(row.id)!.status, 'launching');
+    f.live([{ id: 'real-mcp-session', instanceId: 'real-client-1', workerId: row.worker_id }]);
+    await f.pipeline.tick();
+    assert.equal(f.store.get(row.id)!.status, 'connected');
+    assert.equal(f.executions.length, 0);
+    assert.deepEqual(f.toolCalls, [{ name: 'set-autoexecute', args: { workerId: row.worker_id, enabled: true } }]);
+  } finally { await f.pipeline.stop(); f.store.close(); }
+});
+
 test('existing and ambiguous instances never receive a loader', async () => {
   const f = fixture();
   try {
@@ -227,44 +252,49 @@ test('RAM uses encoded query, 10s deadline, 3 total attempts and bounded backoff
     assert.equal(options!.method, 'GET');
     calls++; return new Response(calls < 3 ? 'error' : 'OK', { status: calls < 3 ? 503 : 200 });
   };
-  const ram = new RamClient(new HttpClient('http://127.0.0.1:8080', '', fake), async ms => { waits.push(ms); });
+  const ram = new RamClient(new HttpClient('http://127.0.0.1:7963', '', fake), 'ram password', async (ms: number) => { waits.push(ms); });
   await ram.launch('Account & ? name', '123456');
   assert.equal(calls, 3); assert.deepEqual(waits, [2000, 4000]);
   const url = new URL(urls[0]!);
   assert.equal(url.searchParams.get('Account'), 'Account & ? name');
   assert.equal(url.searchParams.get('PlaceId'), '123456');
+  assert.equal(url.searchParams.get('Password'), 'ram password');
+  assert.equal(url.pathname, '/v2/LaunchAccount');
   assert.equal(deadlines.length, 3);
   assert.ok(deadlines.every(signal => signal instanceof AbortSignal));
   let failedCalls = 0;
-  const fail = new RamClient(new HttpClient('http://localhost', '', async () => { failedCalls++; throw new Error('timeout'); }), async () => {});
+  const fail = new RamClient(new HttpClient('http://localhost', '', async () => { failedCalls++; throw new Error('timeout'); }), '', async () => {});
   await assert.rejects(() => fail.launch('test', '123456'), /timeout/); assert.equal(failedCalls, 3);
 });
 
-test('MCP validates response contracts and forwards execute body', async () => {
+test('MCP validates real camelCase contracts and forwards tool execution', async () => {
   const requests: { path: string; body: unknown }[] = [];
   const mcp = new McpClient(new HttpClient('http://127.0.0.1:28429', 'upstream-secret', async (input, init) => {
     assert.equal((init!.headers as Record<string, string>).authorization, 'Bearer upstream-secret');
     const path = new URL(String(input)).pathname;
     requests.push({ path, body: init?.body ? JSON.parse(init.body as string) : null });
-    return Response.json(path === '/api/sessions' ? { sessions: [{ id: 's', instance_id: 'i', account_alias: 'alpha', place_id: '123456' }] } : path === '/api/processes' ? [{ instance_id: 'i' }] : { ok: true });
+    return Response.json(path === '/api/sessions' ? { activeCount: 1, sessions: [{ workerId: 's', pid: 42, status: 'active' }] } : path === '/api/processes' ? { processes: [{ pid: 42, workerId: 's' }] } : { result: { content: [{ type: 'text', text: 'ok' }] } });
   }));
-  await mcp.health(); assert.equal((await mcp.sessions())[0]!.instanceId, 'i');
-  assert.deepEqual(await mcp.processes(), [{ instanceId: 'i' }]); await mcp.execute('s', 'script');
-  assert.deepEqual(requests.at(-1), { path: '/api/execute', body: { session_id: 's', script: 'script' } });
-  const broken = new McpClient(new HttpClient('http://localhost', '', async () => Response.json({ sessions: [{ id: 's' }] })));
-  await assert.rejects(() => broken.sessions(), /instance_id/);
+  await mcp.health(); assert.equal((await mcp.sessions())[0]!.instanceId, 'pid:42');
+  assert.deepEqual(await mcp.processes(), [{ instanceId: 'pid:42', workerId: 's' }]); await mcp.execute('s', 'script');
+  assert.deepEqual(requests.at(-1), { path: '/api/tools/execute', body: { name: 'execute-script', arguments: { workerId: 's', code: 'script', async: false } } });
+  const broken = new McpClient(new HttpClient('http://localhost', '', async () => Response.json({ sessions: [{ status: 'active' }] })));
+  await assert.rejects(() => broken.sessions(), /workerId/);
 });
 
 test('HTTP endpoints authenticate, reject stale callbacks, save findings and enforce lifecycle', async () => {
   const f = fixture();
   const dir = mkdtempSync(join(tmpdir(), 'pipeline-http-'));
-  const server = createApp(f.pipeline, token, callbackToken, dir, log).listen(0, '127.0.0.1');
+  const server = createApp(f.pipeline, token, callbackToken, autoexecToken, dir, log).listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const addr = server.address(); assert.ok(addr && typeof addr === 'object');
   const base = `http://127.0.0.1:${addr.port}`;
   const call = (path: string, body?: unknown) => fetch(base + path, { method: body === undefined ? 'GET' : 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const callback = (path: string, body: unknown, bearer = callbackToken) => fetch(base + path, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const autoexec = (body: unknown, bearer = autoexecToken) => fetch(base + '/internal/autoexec/register', { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   try {
+    const ui = await fetch(base + '/');
+    assert.equal(ui.status, 200); assert.match(await ui.text(), /Security Pipeline/);
     assert.equal((await fetch(base + '/status')).status, 401);
     assert.equal((await call('/launch', { links: ['123456'], alias: 'alpha' })).status, 202);
     assert.equal((await call('/launch', { links: ['123456'], alias: 'alpha' })).status, 200);
@@ -273,9 +303,14 @@ test('HTTP endpoints authenticate, reject stale callbacks, save findings and enf
     const row = f.store.all()[0]!;
     const body = { worker_id: row.worker_id };
     const prefix = `/internal/sessions/${row.id}`;
+    assert.equal((await autoexec({ username: 'AlphaUser', place_id: '123456' }, token)).status, 401);
+    assert.equal((await autoexec({ username: 'AlphaUser', place_id: '123456' })).status, 409);
     assert.equal((await callback(prefix + '/done', body, token)).status, 401);
     assert.equal((await callback(prefix + '/done', body)).status, 409);
     f.store.transition(row.id, 'launching'); f.store.transition(row.id, 'connected', null, 'instance');
+    const registration = await autoexec({ username: 'AlphaUser', place_id: '123456' });
+    assert.equal(registration.status, 200);
+    assert.equal((await registration.json() as { worker_id: string }).worker_id, row.worker_id);
     assert.equal((await callback(prefix + '/analyzing', { worker_id: 'stale' })).status, 409);
     assert.equal((await callback(prefix + '/analyzing', body)).status, 200);
     assert.equal((await callback(prefix + '/analyzing', body)).status, 200);
@@ -293,6 +328,35 @@ test('HTTP endpoints authenticate, reject stale callbacks, save findings and enf
   } finally {
     await f.pipeline.stop(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     f.store.close(); rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('prompt console persists one isolated run per connected worker', async () => {
+  const f = fixture(Date.now, new Store(':memory:'), 'project-real-autoexec');
+  const seen: string[] = [];
+  const fakeAgent = {
+    configured: true, model: 'test-model',
+    async run(workerId: string, prompt: string) { seen.push(`${workerId}:${prompt}`); return `ok:${workerId}`; },
+  } as unknown as AgentRunner;
+  const one = f.store.create('123456', '123456', 'alpha').session;
+  const two = f.store.create('123456', '123456', 'beta').session;
+  for (const row of [one, two]) { f.store.transition(row.id, 'launching'); f.store.transition(row.id, 'connected', null, `worker:${row.worker_id}`); }
+  const server = createApp(f.pipeline, token, callbackToken, autoexecToken, 'findings', log, fakeAgent, accounts).listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const addr = server.address(); assert.ok(addr && typeof addr === 'object');
+  try {
+    const response = await fetch(`http://127.0.0.1:${addr.port}/prompts`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'liste remotes', scope: 'all' }),
+    });
+    assert.equal(response.status, 202);
+    await flush(); await flush();
+    assert.equal(f.store.prompts().length, 2);
+    assert.ok(f.store.prompts().every(run => run.status === 'done' && run.response === `ok:${run.worker_id}`));
+    assert.equal(seen.length, 2);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await f.pipeline.stop(); f.store.close();
   }
 });
 
@@ -323,15 +387,27 @@ test('loader isolates worker identity, protects repeated runs and fetches MCP in
   assert.ok(!loader.includes(token));
 });
 
+test('Project Real Auto-Execute bootstrap registers the player and never embeds pipeline callback secrets', () => {
+  const script = makeProjectRealAutoexec('http://127.0.0.1:3000', autoexecToken);
+  assert.match(script, /Url = "\\\d{3}/);
+  assert.match(script, /Players\.LocalPlayer/);
+  assert.match(script, /MCP_WORKER_ID/);
+  assert.match(script, /__AUTHORIZED_PIPELINE_BOOTSTRAP_JOB/);
+  assert.ok(!script.includes(token));
+  assert.ok(!script.includes(callbackToken));
+});
+
 test('configuration fails closed for absent authorization, placeholder tokens and nonlocal origins', () => {
-  const base = { PIPELINE_TOKEN: token, INTERNAL_CALLBACK_TOKEN: callbackToken, AUTHORIZED_PLACE_IDS: '123456', ACCOUNTS_FILE: join(process.cwd(), 'accounts.example.json') };
+  const base = { PIPELINE_TOKEN: token, INTERNAL_CALLBACK_TOKEN: callbackToken, AUTOEXEC_TOKEN: autoexecToken, AUTHORIZED_PLACE_IDS: '123456', ACCOUNTS_FILE: join(process.cwd(), 'accounts.example.json') };
   assert.equal(loadConfig(base).authorized.has('123456'), true);
-  assert.equal(loadConfig(base).ramUrl, 'http://127.0.0.1:8080');
+  assert.equal(loadConfig(base).ramUrl, 'http://127.0.0.1:7963');
   assert.throws(() => loadConfig({ ...base, AUTHORIZED_PLACE_IDS: '' }));
   assert.throws(() => loadConfig({ ...base, PIPELINE_TOKEN: 'short' }));
   assert.throws(() => loadConfig({ ...base, PIPELINE_TOKEN: 'replace-with-a-long-random-secret' }));
   assert.throws(() => loadConfig({ ...base, INTERNAL_CALLBACK_TOKEN: token }));
+  assert.throws(() => loadConfig({ ...base, AUTOEXEC_TOKEN: callbackToken }));
   assert.throws(() => loadConfig({ ...base, HOST: '0.0.0.0' }));
   assert.throws(() => loadConfig({ ...base, RAM_URL: 'http://external.test' }));
+  assert.throws(() => loadConfig({ ...base, RAM_PASSWORD: 'short' }));
   assert.throws(() => loadConfig({ ...base, MCP_URL: 'http://127.0.0.1:9999' }));
 });

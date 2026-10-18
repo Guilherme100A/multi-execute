@@ -4,15 +4,18 @@ import { HttpClient, McpClient, RamClient } from './clients.js';
 import { RotatingLogger } from './logger.js';
 import { Pipeline } from './pipeline.js';
 import { Store } from './store.js';
+import { AgentRunner } from './agent.js';
 
 const config = loadConfig();
 const log = new RotatingLogger(config.logDirectory);
 const store = new Store(config.databaseFile);
+const mcp = new McpClient(new HttpClient(config.mcpUrl, config.mcpToken));
 const pipeline = new Pipeline(store,
-  new RamClient(new HttpClient(config.ramUrl, config.ramToken), undefined, config.maxRetries, config.retryBaseDelayMs),
-  new McpClient(new HttpClient(config.mcpUrl, config.mcpToken)),
-  config.accounts, config.authorized, log, Date.now, config.healthIntervalMs, config.launchTimeoutMs);
-const server = createApp(pipeline, config.token, config.callbackToken, config.findingsDirectory, log).listen(config.port, config.host, () => {
+  new RamClient(new HttpClient(config.ramUrl), config.ramPassword, undefined, config.maxRetries, config.retryBaseDelayMs),
+  mcp,
+  config.accounts, config.authorized, log, Date.now, config.healthIntervalMs, config.launchTimeoutMs, config.injectionMode);
+const agent = new AgentRunner(config.openaiApiKey, config.openaiModel, mcp);
+const server = createApp(pipeline, config.token, config.callbackToken, config.autoexecToken, config.findingsDirectory, log, agent, config.accounts).listen(config.port, config.host, () => {
   log.info('server_started', { host: config.host, port: config.port });
   console.log(`Authorized pipeline: http://${config.host}:${config.port}`);
   pipeline.start();

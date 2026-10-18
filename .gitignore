@@ -3,6 +3,7 @@ dist/
 .env
 .maestri/
 accounts.json
+project-real-autoexec.lua
 data/
 logs/
 findings/*

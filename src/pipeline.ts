@@ -1,7 +1,7 @@
 import type { McpClient, McpSession, RamClient } from './clients.js';
 import type { Logger } from './logger.js';
 import { makeLoader } from './loader.js';
-import { Store, type Session } from './store.js';
+import { ConflictError, Store, type Session } from './store.js';
 import { InputError, placeId, aliasValue, type Account } from './validation.js';
 
 export class Pipeline {
@@ -14,15 +14,16 @@ export class Pipeline {
   private drainPromise?: Promise<void>;
   private drainRequested = false;
   constructor(readonly store: Store, private ram: Pick<RamClient, 'launch'>,
-    private mcp: Pick<McpClient, 'health' | 'sessions' | 'processes' | 'execute'>,
+    private mcp: Pick<McpClient, 'health' | 'sessions' | 'processes' | 'execute' | 'callTool'>,
     private accounts: Account[], private authorized: Set<string>, private log: Logger, private now = Date.now,
-    private healthIntervalMs = 30_000, private launchTimeoutMs = 60_000) {
+    private healthIntervalMs = 30_000, private launchTimeoutMs = 60_000,
+    private injectionMode: 'project-real-autoexec' | 'mcp-execute' = 'mcp-execute') {
     // A crash between persistent claim and execute acknowledgment cannot be retried safely.
     for (const row of store.all()) {
       if (['pending', 'launching', 'connected', 'analyzing'].includes(row.status) &&
           (!authorized.has(row.place_id) || !accounts.some(account => account.alias === row.account_alias)))
         this.change(row, 'failed', 'Persisted session is no longer authorized/configured');
-      else if (row.status === 'connected' && row.instance_id && store.claimed(row.instance_id))
+      else if (this.injectionMode === 'mcp-execute' && row.status === 'connected' && row.instance_id && store.claimed(row.instance_id))
         this.change(row, 'failed', 'Controller restarted before analyzing acknowledgment; execute outcome uncertain');
     }
   }
@@ -42,6 +43,15 @@ export class Pipeline {
     const current = this.store.get(id);
     if (current && (!this.authorized.has(current.place_id) || !this.accounts.some(account => account.alias === current.account_alias))) throw new InputError('Session is no longer authorized/configured');
     const row = this.store.retry(id); this.log.info('retry_queued', { id }); this.kick(); return row;
+  }
+  registerAutoexec(username: unknown, rawPlaceId: unknown): Session {
+    if (typeof username !== 'string') throw new InputError('username is required');
+    const place = placeId(rawPlaceId);
+    const account = this.accounts.find(row => row.robloxUsername.toLowerCase() === username.toLowerCase());
+    if (!account) throw new InputError('Roblox username is not mapped in accounts.json');
+    const matches = this.store.all().filter(row => row.account_alias === account.alias && row.place_id === place && ['launching', 'connected', 'analyzing'].includes(row.status));
+    if (matches.length !== 1) throw new ConflictError(matches.length ? 'Ambiguous active session' : 'No launching session for this account/game');
+    return matches[0]!;
   }
   private kick(): void {
     if (this.stopping) return;
@@ -86,19 +96,25 @@ export class Pipeline {
       const live = new Set(processes.map(process => process.instanceId));
       for (const row of this.store.all()) {
         if (row.status === 'launching') {
-          const candidates = sessions.filter(session => session.accountAlias === row.account_alias && session.placeId === row.place_id &&
-            live.has(session.instanceId) && !this.store.isBaseline(row.id, session.instanceId) && !this.store.claimed(session.instanceId) &&
-            (!session.workerId || session.workerId === row.worker_id));
+          const candidates = sessions.filter(session => this.injectionMode === 'project-real-autoexec'
+            ? session.workerId === row.worker_id
+            : live.has(session.instanceId) && session.accountAlias === row.account_alias && session.placeId === row.place_id &&
+              !this.store.isBaseline(row.id, session.instanceId) && !this.store.claimed(session.instanceId) &&
+              (!session.workerId || session.workerId === row.worker_id));
           // Never guess when two instances fit the same account/game.
           if (candidates.length === 1) {
             const match = candidates[0]!;
             this.change(row, 'connected', null, match.instanceId);
-            await this.inject(this.store.get(row.id)!, match);
+            if (this.injectionMode === 'mcp-execute') await this.inject(this.store.get(row.id)!, match);
+            else await this.armAutoexecute(this.store.get(row.id)!, match);
           } else if (candidates.length > 1) this.log.error('ambiguous_instance', { id: row.id });
         } else if (row.status === 'connected' || row.status === 'analyzing') {
-          const match = sessions.find(session => session.instanceId === row.instance_id && session.accountAlias === row.account_alias && session.placeId === row.place_id && (!session.workerId || session.workerId === row.worker_id));
-          if (!match || !live.has(row.instance_id!)) this.change(row, 'disconnected', 'MCP session/process disappeared');
-          else if (row.status === 'connected' && !this.store.claimed(match.instanceId)) await this.inject(row, match);
+          const match = sessions.find(session => this.injectionMode === 'project-real-autoexec'
+            ? session.workerId === row.worker_id
+            : session.instanceId === row.instance_id && session.accountAlias === row.account_alias && session.placeId === row.place_id &&
+              (!session.workerId || session.workerId === row.worker_id));
+          if (!match || (this.injectionMode === 'mcp-execute' && !live.has(row.instance_id!))) this.change(row, 'disconnected', 'MCP session disappeared');
+          else if (this.injectionMode === 'mcp-execute' && row.status === 'connected' && !this.store.claimed(match.instanceId)) await this.inject(row, match);
         }
       }
       this.kick();
@@ -118,6 +134,15 @@ export class Pipeline {
       // An ambiguous HTTP outcome must never cause a second execute on this instance.
       const current = this.store.get(row.id)!;
       if (current.status === 'connected' || current.status === 'analyzing') this.change(current, 'failed', `Loader execution outcome uncertain: ${String(error)}`);
+    }
+  }
+  private async armAutoexecute(row: Session, match: McpSession): Promise<void> {
+    if (!this.store.claim(row, match.instanceId)) return;
+    try {
+      await this.mcp.callTool('set-autoexecute', { workerId: row.worker_id, enabled: true });
+      this.log.info('autoexecute_armed', { id: row.id, worker_id: row.worker_id });
+    } catch (error) {
+      this.log.error('autoexecute_arm_failed', { id: row.id, worker_id: row.worker_id, error: String(error) });
     }
   }
   private async drain(): Promise<void> {

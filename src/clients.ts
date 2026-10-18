@@ -16,13 +16,17 @@ export class HttpClient {
   }
 }
 export class RamClient {
-  constructor(private http: HttpClient, private wait = sleep, private attempts = 3, private baseDelay = 2_000) {}
+  constructor(private http: HttpClient, private password = '', private wait = sleep, private attempts = 3, private baseDelay = 2_000) {}
   async launch(account: string, place: string): Promise<void> {
     const params = new URLSearchParams({ Account: account, PlaceId: place });
+    if (this.password) params.set('Password', this.password);
     for (let attempt = 0; attempt < this.attempts; attempt++) {
       try {
-        const result = await this.http.request(`/LaunchAccount?${params}`, 'GET', undefined, 10_000);
-        if (result && typeof result === 'object' && ('success' in result) && result.success === false) throw new Error('RAM rejected launch');
+        const result = await this.http.request(`/v2/LaunchAccount?${params}`, 'GET', undefined, 10_000);
+        if (result && typeof result === 'object') {
+          const row = result as Record<string, unknown>;
+          if (row.Success === false || row.success === false) throw new Error(`RAM rejected launch: ${String(row.Message ?? row.message ?? 'unknown error')}`);
+        }
         if (typeof result === 'string' && /^(error|failed|false)\b/i.test(result.trim())) throw new Error('RAM rejected launch');
         return;
       } catch (error) {
@@ -32,8 +36,9 @@ export class RamClient {
     }
   }
 }
-export interface McpSession { id: string; instanceId: string; accountAlias: string; placeId: string; workerId?: string }
-export interface McpProcess { instanceId: string }
+export interface McpSession { id: string; instanceId: string; workerId?: string; status?: string; pid?: string; accountAlias?: string; placeId?: string }
+export interface McpProcess { instanceId: string; workerId?: string }
+export interface McpTool { name: string; description: string; inputSchema: Record<string, unknown> }
 function rows(value: unknown, key: string): Record<string, unknown>[] {
   const list = Array.isArray(value) ? value : value && typeof value === 'object' ? (value as Record<string, unknown>)[key] : undefined;
   if (!Array.isArray(list) || list.some(row => !row || typeof row !== 'object')) throw new Error(`Invalid MCP ${key} response`);
@@ -43,6 +48,16 @@ function required(row: Record<string, unknown>, key: string): string {
   const value = row[key];
   if (typeof value !== 'string' || !value) throw new Error(`MCP requires nonempty ${key}`);
   return value;
+}
+function optional(row: Record<string, unknown>, key: string): string | undefined {
+  const value = row[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' || !value) throw new Error(`MCP requires nonempty ${key} when present`);
+  return value;
+}
+function stringish(row: Record<string, unknown>, key: string): string | undefined {
+  const value = row[key];
+  return typeof value === 'string' && value ? value : typeof value === 'number' && Number.isFinite(value) ? String(value) : undefined;
 }
 export class McpClient {
   constructor(private http: HttpClient) {}
@@ -54,16 +69,38 @@ export class McpClient {
     }
   }
   async sessions(): Promise<McpSession[]> {
-    return rows(await this.http.request('/api/sessions'), 'sessions').map(row => ({
-      id: required(row, 'id'), instanceId: required(row, 'instance_id'), accountAlias: required(row, 'account_alias'),
-      placeId: required(row, 'place_id'), ...(typeof row.worker_id === 'string' ? { workerId: row.worker_id } : {}),
-    }));
+    return rows(await this.http.request('/api/sessions'), 'sessions').filter(row => row.status === 'active').map(row => {
+      const workerId = required(row, 'workerId');
+      const pid = stringish(row, 'pid');
+      return { id: workerId, workerId, status: 'active', instanceId: pid ? `pid:${pid}` : `worker:${workerId}`, ...(pid ? { pid } : {}) };
+    });
   }
   async processes(): Promise<McpProcess[]> {
-    return rows(await this.http.request('/api/processes'), 'processes').map(row => ({ instanceId: required(row, 'instance_id') }));
+    return rows(await this.http.request('/api/processes'), 'processes').map(row => {
+      const pid = stringish(row, 'pid');
+      if (!pid) throw new Error('MCP process requires pid');
+      const workerId = optional(row, 'workerId');
+      return { instanceId: `pid:${pid}`, ...(workerId ? { workerId } : {}) };
+    });
   }
   async execute(id: string, script: string): Promise<void> {
-    const value = await this.http.request('/api/execute', 'POST', { session_id: id, script });
-    if (value && typeof value === 'object' && 'success' in value && value.success === false) throw new Error('MCP rejected execution');
+    await this.callTool('execute-script', { workerId: id, code: script, async: false });
+  }
+  async tools(): Promise<McpTool[]> {
+    return rows(await this.http.request('/api/tools'), 'tools').map(row => ({
+      name: required(row, 'name'), description: optional(row, 'description') ?? '',
+      inputSchema: row.inputSchema && typeof row.inputSchema === 'object' ? row.inputSchema as Record<string, unknown> : { type: 'object', properties: {} },
+    }));
+  }
+  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    const value = await this.http.request('/api/tools/execute', 'POST', { name, arguments: args }, 120_000);
+    if (value && typeof value === 'object') {
+      const envelope = value as Record<string, unknown>;
+      if (envelope.error) throw new Error(`MCP tool error: ${JSON.stringify(envelope.error)}`);
+      const result = envelope.result;
+      if (result && typeof result === 'object' && (result as Record<string, unknown>).isError === true)
+        throw new Error(`MCP tool failed: ${JSON.stringify(result)}`);
+    }
+    return value;
   }
 }

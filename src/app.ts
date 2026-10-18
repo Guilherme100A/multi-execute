@@ -1,23 +1,52 @@
 import express, { type ErrorRequestHandler } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Pipeline } from './pipeline.js';
 import { ConflictError } from './store.js';
 import { InputError } from './validation.js';
 import type { Logger } from './logger.js';
+import type { AgentRunner } from './agent.js';
+import type { Account } from './validation.js';
 
-export function createApp(pipeline: Pipeline, token: string, callbackToken: string, findings: string, log: Logger) {
+export function createApp(pipeline: Pipeline, token: string, callbackToken: string, autoexecToken: string,
+  findings: string, log: Logger, agent?: AgentRunner, accounts: Account[] = []) {
   const app = express();
   app.disable('x-powered-by');
+  app.use(express.static(resolve('public'), { index: 'index.html', fallthrough: true }));
   app.use((req, res, next) => {
     const supplied = Buffer.from(req.headers.authorization ?? '');
-    const expected = Buffer.from(`Bearer ${req.path.startsWith('/internal/') ? callbackToken : token}`);
+    const routeToken = req.path.startsWith('/internal/autoexec/') ? autoexecToken : req.path.startsWith('/internal/') ? callbackToken : token;
+    const expected = Buffer.from(`Bearer ${routeToken}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { res.status(401).json({ error: 'Unauthorized' }); return; }
     next();
   });
   app.use(express.json({ limit: '1mb' }));
+  app.get('/config', (_req, res) => res.json({
+    accounts: accounts.map(account => ({ alias: account.alias, username: account.robloxUsername })),
+    agent: { configured: agent?.configured ?? false, model: agent?.model ?? null },
+  }));
   app.get('/status', (_req, res) => res.json({ mcp_online: pipeline.online, queue_paused: !pipeline.online, sessions: pipeline.store.all() }));
+  app.get('/prompts', (_req, res) => res.json({ runs: pipeline.store.prompts() }));
+  app.post('/prompts', (req, res) => {
+    if (!agent?.configured) throw new InputError('Configure OPENAI_API_KEY to use the prompt console');
+    const prompt = req.body?.prompt;
+    if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 8000) throw new InputError('prompt must contain 1–8000 characters');
+    const available = pipeline.store.all().filter(row => ['connected', 'analyzing'].includes(row.status));
+    const targets = req.body?.scope === 'all' ? available : available.filter(row => row.id === req.body?.session_id);
+    if (!targets.length) throw new ConflictError('No connected target session');
+    const runs = targets.map(session => pipeline.store.createPrompt(session, prompt.trim()));
+    for (const run of runs) void (async () => {
+      pipeline.store.updatePrompt(run.id, 'running');
+      try {
+        const output = await agent.run(run.worker_id, run.prompt);
+        pipeline.store.updatePrompt(run.id, 'done', output);
+      } catch (error) {
+        pipeline.store.updatePrompt(run.id, 'failed', null, error instanceof Error ? error.message : String(error));
+      }
+    })();
+    res.status(202).json({ runs });
+  });
   app.post('/launch', (req, res) => {
     const result = pipeline.launch(req.body?.links, req.body?.alias);
     res.status(result.every(row => row.reused) ? 200 : 202).json({ sessions: result });
@@ -25,6 +54,10 @@ export function createApp(pipeline: Pipeline, token: string, callbackToken: stri
   app.post('/sessions/:id/retry', (req, res) => {
     if (!pipeline.store.get(req.params.id)) { res.status(404).json({ error: 'Unknown session' }); return; }
     res.status(202).json({ session: pipeline.retry(req.params.id) });
+  });
+  app.post('/internal/autoexec/register', (req, res) => {
+    const session = pipeline.registerAutoexec(req.body?.username, req.body?.place_id);
+    res.json({ session_id: session.id, worker_id: session.worker_id, loader_url: 'http://127.0.0.1:28429/mcp.lua' });
   });
   for (const status of ['analyzing', 'done', 'failed'] as const) {
     app.post(`/internal/sessions/:id/${status}`, (req, res) => {

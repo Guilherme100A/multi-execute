@@ -10,6 +10,11 @@ export interface Session {
   created_at: number; updated_at: number; launching_at: number | null;
   connected_at: number | null; finished_at: number | null; instance_id: string | null;
 }
+export type PromptStatus = 'queued' | 'running' | 'done' | 'failed';
+export interface PromptRun {
+  id: string; session_id: string; worker_id: string; prompt: string; status: PromptStatus;
+  response: string | null; error: string | null; created_at: number; updated_at: number;
+}
 const transitions: Record<Status, Status[]> = {
   pending: ['launching', 'failed'], launching: ['connected', 'failed'],
   connected: ['analyzing', 'failed', 'disconnected'], analyzing: ['done', 'failed', 'disconnected'],
@@ -37,7 +42,13 @@ export class Store {
       );
       CREATE TABLE IF NOT EXISTS launch_baselines (
         session_id TEXT NOT NULL, instance_id TEXT NOT NULL, PRIMARY KEY(session_id, instance_id)
-      );`);
+      );
+      CREATE TABLE IF NOT EXISTS prompt_runs (
+        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, worker_id TEXT NOT NULL, prompt TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed')),
+        response TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS prompt_runs_created ON prompt_runs(created_at DESC);`);
   }
   get(id: string): Session | undefined { return this.db.prepare('SELECT * FROM sessions WHERE id=?').get(id) as Session | undefined; }
   all(): Session[] { return this.db.prepare('SELECT * FROM sessions ORDER BY created_at,rowid').all() as unknown as Session[]; }
@@ -91,6 +102,20 @@ export class Store {
   claimed(instance: string): boolean { return !!this.db.prepare('SELECT 1 FROM injections WHERE instance_id=?').get(instance); }
   claim(session: Session, instance: string): boolean {
     return !!this.db.prepare('INSERT OR IGNORE INTO injections VALUES(?,?,?,?)').run(instance, session.id, session.worker_id, this.now()).changes;
+  }
+  createPrompt(session: Session, prompt: string): PromptRun {
+    const id = randomUUID(), timestamp = this.now();
+    this.db.prepare("INSERT INTO prompt_runs(id,session_id,worker_id,prompt,status,created_at,updated_at) VALUES(?,?,?,?, 'queued',?,?)")
+      .run(id, session.id, session.worker_id, prompt, timestamp, timestamp);
+    return this.db.prepare('SELECT * FROM prompt_runs WHERE id=?').get(id) as unknown as PromptRun;
+  }
+  prompts(limit = 100): PromptRun[] {
+    return this.db.prepare('SELECT * FROM prompt_runs ORDER BY created_at DESC LIMIT ?').all(limit) as unknown as PromptRun[];
+  }
+  updatePrompt(id: string, status: PromptStatus, response: string | null = null, error: string | null = null): PromptRun {
+    const result = this.db.prepare('UPDATE prompt_runs SET status=?,response=?,error=?,updated_at=? WHERE id=?').run(status, response, error, this.now(), id);
+    if (!result.changes) throw new ConflictError('Unknown prompt run');
+    return this.db.prepare('SELECT * FROM prompt_runs WHERE id=?').get(id) as unknown as PromptRun;
   }
   close(): void { this.db.close(); }
 }

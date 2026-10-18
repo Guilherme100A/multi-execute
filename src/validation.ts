@@ -18,7 +18,7 @@ export function aliasValue(input: unknown): string {
   return input;
 }
 
-export interface Account { alias: string; ramAccount: string }
+export interface Account { alias: string; ramAccount: string; robloxUsername: string }
 export function parseAccounts(value: unknown): Account[] {
   if (!Array.isArray(value) || !value.length) throw new InputError('accounts.json must be a nonempty array');
   const seen = new Set<string>();
@@ -29,6 +29,7 @@ export function parseAccounts(value: unknown): Account[] {
     if (seen.has(alias)) throw new InputError(`Duplicate alias: ${alias}`);
     seen.add(alias);
     if (typeof row.ramAccount !== 'string' || !row.ramAccount.trim()) throw new InputError(`Missing RAM account: ${alias}`);
-    return { alias, ramAccount: row.ramAccount };
+    if (typeof row.robloxUsername !== 'string' || !/^[A-Za-z0-9_]{3,20}$/.test(row.robloxUsername)) throw new InputError(`Missing/invalid Roblox username: ${alias}`);
+    return { alias, ramAccount: row.ramAccount, robloxUsername: row.robloxUsername };
   });
 }

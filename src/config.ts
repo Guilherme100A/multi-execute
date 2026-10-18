@@ -5,9 +5,11 @@ import { parseAccounts, placeId } from './validation.js';
 export function loadConfig(env = process.env) {
   const token = env.PIPELINE_TOKEN ?? '';
   const callbackToken = env.INTERNAL_CALLBACK_TOKEN ?? '';
+  const autoexecToken = env.AUTOEXEC_TOKEN ?? '';
   const invalidSecret = (value: string) => value.length < 24 || /^replace-with-/i.test(value);
   if (invalidSecret(token)) throw new Error('PIPELINE_TOKEN must be a non-placeholder secret of at least 24 characters');
   if (invalidSecret(callbackToken) || callbackToken === token) throw new Error('INTERNAL_CALLBACK_TOKEN must be a different non-placeholder secret of at least 24 characters');
+  if (invalidSecret(autoexecToken) || autoexecToken === token || autoexecToken === callbackToken) throw new Error('AUTOEXEC_TOKEN must be a third, different non-placeholder secret of at least 24 characters');
   const host = env.HOST ?? '127.0.0.1';
   if (!['127.0.0.1', '::1'].includes(host)) throw new Error('HOST must be loopback');
   const port = Number(env.PORT ?? 3000);
@@ -28,15 +30,17 @@ export function loadConfig(env = process.env) {
       throw new Error(`${key} must be a loopback HTTP origin`);
     return value.origin;
   };
-  const ramPort = integer('RAM_PORT', 8080, 1, 65535);
+  const ramPort = integer('RAM_PORT', 7963, 1, 65535);
   const mcpPort = integer('MCP_PORT', 28429, 1, 65535);
   const mcpHost = env.MCP_HOST ?? '127.0.0.1';
   if (mcpHost !== '127.0.0.1' || mcpPort !== 28429) throw new Error('MCP_HOST/MCP_PORT must match the loader: 127.0.0.1:28429');
   const mcpUrl = upstream('MCP_URL', `http://${mcpHost}:${mcpPort}`);
   if (mcpUrl !== 'http://127.0.0.1:28429') throw new Error('MCP_URL must match the loader: http://127.0.0.1:28429');
+  const ramPassword = env.RAM_PASSWORD ?? '';
+  if (ramPassword && ramPassword.length < 6) throw new Error('RAM_PASSWORD must be empty or at least 6 characters');
   return {
-    host, port, token, callbackToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
-    ramToken: env.RAM_TOKEN ?? '', mcpToken: env.MCP_TOKEN ?? '',
+    host, port, token, callbackToken, autoexecToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
+    ramPassword, mcpToken: env.MCP_TOKEN ?? '',
     accounts: parseAccounts(JSON.parse(readFileSync(resolve(env.ACCOUNTS_FILE ?? 'accounts.json'), 'utf8')) as unknown),
     databaseFile: resolve(env.DB_PATH ?? env.DATABASE_FILE ?? 'data/sessions.sqlite'),
     logDirectory: resolve(env.LOG_DIRECTORY ?? 'logs'), findingsDirectory: resolve(env.FINDINGS_DIRECTORY ?? 'findings'),
@@ -44,5 +48,7 @@ export function loadConfig(env = process.env) {
     launchTimeoutMs: integer('LAUNCH_TIMEOUT_MS', 60_000, 10_000, 3_600_000),
     maxRetries: integer('MAX_RETRIES', 3, 1, 10),
     retryBaseDelayMs: integer('RETRY_BASE_DELAY_MS', 2_000, 1, 60_000),
+    injectionMode: env.INJECTION_MODE === 'mcp-execute' ? 'mcp-execute' as const : 'project-real-autoexec' as const,
+    openaiApiKey: env.OPENAI_API_KEY ?? '', openaiModel: env.OPENAI_MODEL ?? 'gpt-6.1-sol',
   };
 }

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Roblox Security Pipeline</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div><span class="eyebrow">AUTHORIZED TESTING</span><h1>Security Pipeline</h1></div>
+      <div class="health"><span id="healthDot" class="dot"></span><span id="healthText">Conectando…</span></div>
+    </header>
+
+    <section id="login" class="card login">
+      <p class="label">Acesso local</p>
+      <h2>Conecte ao Launcher</h2>
+      <p class="muted">Use o valor de <code>PIPELINE_TOKEN</code>. Ele fica somente nesta aba.</p>
+      <form id="loginForm"><input id="token" type="password" autocomplete="off" placeholder="Token do pipeline" required><button>Entrar</button></form>
+      <p id="loginError" class="error"></p>
+    </section>
+
+    <main id="dashboard" hidden>
+      <section class="launch card">
+        <div><p class="label">NOVA SESSÃO</p><h2>Abrir jogo</h2></div>
+        <form id="launchForm">
+          <label>Conta<select id="account" required></select></label>
+          <label class="wide">Link ou PlaceId<input id="game" placeholder="https://www.roblox.com/games/123456789" required></label>
+          <button id="launchButton">Iniciar</button>
+        </form>
+        <p id="launchMessage" class="message"></p>
+      </section>
+
+      <div class="workspace">
+        <section class="sessions card">
+          <div class="section-title"><div><p class="label">WORKERS</p><h2>Sessões</h2></div><span id="sessionCount" class="count">0</span></div>
+          <div id="sessions" class="session-list"></div>
+        </section>
+
+        <section class="terminal card">
+          <div class="terminal-head">
+            <div><p class="label">AGENTE</p><h2>Console de análise</h2></div>
+            <span id="model" class="model"></span>
+          </div>
+          <div id="terminalOutput" class="terminal-output"><p class="hint">Selecione uma sessão conectada e envie uma instrução.</p></div>
+          <form id="promptForm" class="prompt-form">
+            <textarea id="prompt" rows="3" maxlength="8000" placeholder="Ex.: liste os remotes e identifique validações que precisam ser reforçadas" required></textarea>
+            <div class="prompt-actions">
+              <label class="toggle"><input id="broadcast" type="checkbox"><span></span>Enviar para todas conectadas</label>
+              <button id="sendPrompt">Enviar prompt</button>
+            </div>
+          </form>
+          <p id="promptError" class="error"></p>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
