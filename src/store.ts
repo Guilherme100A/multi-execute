@@ -49,6 +49,9 @@ export class Store {
         status TEXT NOT NULL CHECK(status IN ('queued','running','done','failed')),
         response TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS agent_threads (
+        worker_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, updated_at INTEGER NOT NULL
+      );
       CREATE INDEX IF NOT EXISTS prompt_runs_created ON prompt_runs(created_at DESC);`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS agent_policy (
       id INTEGER PRIMARY KEY CHECK(id=1), filename TEXT NOT NULL, content TEXT NOT NULL, updated_at INTEGER NOT NULL
@@ -120,6 +123,15 @@ export class Store {
     const result = this.db.prepare('UPDATE prompt_runs SET status=?,response=?,error=?,updated_at=? WHERE id=?').run(status, response, error, this.now(), id);
     if (!result.changes) throw new ConflictError('Unknown prompt run');
     return this.db.prepare('SELECT * FROM prompt_runs WHERE id=?').get(id) as unknown as PromptRun;
+  }
+  agentThread(workerId: string): string | undefined {
+    const row = this.db.prepare('SELECT thread_id FROM agent_threads WHERE worker_id=?').get(workerId) as { thread_id: string } | undefined;
+    return row?.thread_id;
+  }
+  setAgentThread(workerId: string, threadId: string): void {
+    this.db.prepare(`INSERT INTO agent_threads(worker_id,thread_id,updated_at) VALUES(?,?,?)
+      ON CONFLICT(worker_id) DO UPDATE SET thread_id=excluded.thread_id,updated_at=excluded.updated_at`)
+      .run(workerId, threadId, this.now());
   }
   agentPolicy(): AgentPolicy | undefined {
     return this.db.prepare('SELECT filename,content,updated_at FROM agent_policy WHERE id=1').get() as unknown as AgentPolicy | undefined;

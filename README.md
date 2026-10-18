@@ -19,10 +19,11 @@ O Project Real documenta que Auto Execute roda depois da injeção, mas não pub
 
 ## Instalação
 
-Requer Node.js 24+, RAM, Project Real e roblox-mcp-difz na mesma máquina.
+Requer Node.js 24+, RAM, Project Real, roblox-mcp-difz e Codex CLI autenticado na mesma máquina.
 
 ```powershell
 npm ci
+codex login
 Copy-Item .env.example .env
 Copy-Item accounts.example.json accounts.json
 # Edite .env e accounts.json
@@ -88,13 +89,15 @@ Abra `http://127.0.0.1:3000`. A interface pede `PIPELINE_TOKEN` e guarda o valor
 - **Abrir jogo:** escolha uma conta e informe URL ou PlaceId.
 - **Gerenciar contas:** sincronize contas existentes no RAM ou importe uma nova conta sem editar JSON manualmente.
 - **Sessões:** acompanhe os estados e use retry quando permitido.
-- **Console:** selecione uma sessão conectada ou marque “Enviar para todas conectadas”.
+- **Console:** cada sessão possui seu próprio terminal, histórico e campo de prompt. O compositor superior envia o mesmo prompt para todas as sessões conectadas. Estados e respostas chegam por um feed HTTP persistente, sem recarregar a página.
 - **AGENTS.md global:** carregue instruções Markdown aplicadas a todas as sessões.
 - **Histórico:** prompts, respostas e erros ficam persistidos no SQLite.
 
 Na importação, o cookie de sessão passa uma única vez pelo Launcher e segue diretamente para o RAM local. O Launcher não o grava nem registra e não repete a chamada automaticamente. O RAM necessariamente persiste esse cookie no próprio armazenamento de contas. Mantenha o RAM restrito a loopback e nunca compartilhe o cookie.
 
-Para interpretar prompts, configure `OPENAI_API_KEY`. O padrão é `OPENAI_MODEL=gpt-6.1-sol`, escolhido para equilibrar qualidade, latência e custo. O agente usa a Responses API com function calling; as ferramentas são executadas localmente por `POST /api/tools/execute`. O Launcher sempre sobrescreve `workerId`, impedindo que o modelo redirecione uma chamada para outra sessão. Sem chave, lançamento e monitoramento continuam funcionando e o console informa que o agente não está configurado.
+Os terminais usam o login local do **Codex CLI**, sem `OPENAI_API_KEY` no Launcher. O padrão é `AGENT_MODEL=gpt-6.1-sol`. O primeiro prompt cria uma thread com `codex exec --json` em sandbox somente leitura; os seguintes usam `codex exec resume`, mantendo contexto separado por worker. Os eventos são transmitidos ao terminal correspondente.
+
+Cada processo recebe apenas um endpoint MCP intermediário autenticado. Esse proxy remove `workerId` do schema apresentado ao modelo e sobrescreve o valor no servidor, impedindo que um terminal redirecione ferramentas ou faça broadcast para outra sessão. As ferramentas internas de shell, web e arquivos também são proibidas pelo prompt do agente; o acesso ao projeto permanece somente leitura. Se o CLI não estiver instalado ou autenticado, lançamento e monitoramento continuam funcionando e o console mostra o estado da configuração.
 
 Ferramentas expostas ao agente são limitadas no código a inspeção, remotes, execução de teste, metadados e autoexecute. O MCP permanece em `127.0.0.1:28429`; o servidor de referência não autentica sua API e usa CORS aberto, portanto não exponha essa porta na rede.
 
@@ -107,8 +110,8 @@ Ferramentas expostas ao agente são limitadas no código a inspeção, remotes, 
 | `RAM_PASSWORD` | vazio | Webserver Password do RAM |
 | `MCP_URL` | `http://127.0.0.1:28429` | roblox-mcp-difz |
 | `AUTHORIZED_PLACE_IDS` | obrigatório | IDs autorizados, separados por vírgula |
-| `OPENAI_API_KEY` | vazio | Habilita o console de prompts |
-| `OPENAI_MODEL` | `gpt-6.1-sol` | Modelo do agente |
+| `AGENT_CLI_COMMAND` | `codex.cmd` no Windows | Executável local usado pelos terminais |
+| `AGENT_MODEL` | `gpt-6.1-sol` | Modelo solicitado ao Codex CLI |
 | `DB_PATH` | `data/sessions.sqlite` | SQLite em WAL |
 | `HEALTH_CHECK_INTERVAL_MS` | `30000` | Intervalo do monitor |
 | `LAUNCH_TIMEOUT_MS` | `60000` | Limite para o worker conectar |
@@ -138,6 +141,7 @@ Todos os endpoints abaixo exigem `Authorization: Bearer <PIPELINE_TOKEN>`, excet
 | --- | --- |
 | `GET /config` | Contas da interface e estado/modelo do agente |
 | `GET /status` | Saúde do MCP, fila e sessões |
+| `GET /events` | Feed autenticado `text/event-stream` com sessões e execuções em tempo real |
 | `POST /launch` | `{ "links": ["123456"], "alias": "conta-teste" }` |
 | `POST /sessions/:id/retry` | Um único retry para failed/disconnected |
 | `GET /prompts` | Histórico persistido do console |
@@ -148,6 +152,7 @@ Todos os endpoints abaixo exigem `Authorization: Bearer <PIPELINE_TOKEN>`, excet
 | `GET /agent-policy` | Retorna o AGENTS.md global persistido |
 | `POST /agent-policy` | Salva Markdown global de até 64 KiB |
 | `POST /internal/autoexec/register` | Registro autenticado do bootstrap Project Real |
+| `POST /internal/mcp/:workerId` | Proxy MCP exclusivo da sessão usado pelo Codex CLI |
 | `POST /internal/sessions/:id/analyzing` | Callback do controlador de análise |
 | `POST /internal/sessions/:id/done` | Callback final e findings opcionais |
 | `POST /internal/sessions/:id/failed` | Callback de falha |

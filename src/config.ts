@@ -39,6 +39,10 @@ export function loadConfig(env = process.env) {
   const ramPassword = env.RAM_PASSWORD ?? '';
   if (ramPassword && ramPassword.length < 6) throw new Error('RAM_PASSWORD must be empty or at least 6 characters');
   const accountsFile = resolve(env.ACCOUNTS_FILE ?? 'accounts.json');
+  const agentCliCommand = env.AGENT_CLI_COMMAND ?? (process.platform === 'win32' ? 'codex.cmd' : 'codex');
+  if (!/^[A-Za-z0-9_.-]{1,80}$/.test(agentCliCommand)) throw new Error('AGENT_CLI_COMMAND must be an executable name without a path');
+  const agentModel = env.AGENT_MODEL ?? 'gpt-6.1-sol';
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(agentModel)) throw new Error('Invalid AGENT_MODEL');
   return {
     host, port, token, callbackToken, autoexecToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
     ramPassword, mcpToken: env.MCP_TOKEN ?? '',
@@ -50,6 +54,6 @@ export function loadConfig(env = process.env) {
     maxRetries: integer('MAX_RETRIES', 3, 1, 10),
     retryBaseDelayMs: integer('RETRY_BASE_DELAY_MS', 2_000, 1, 60_000),
     injectionMode: env.INJECTION_MODE === 'mcp-execute' ? 'mcp-execute' as const : 'project-real-autoexec' as const,
-    openaiApiKey: env.OPENAI_API_KEY ?? '', openaiModel: env.OPENAI_MODEL ?? 'gpt-6.1-sol',
+    agentCliCommand, agentModel,
   };
 }

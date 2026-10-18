@@ -13,7 +13,7 @@ import { makeLoader } from '../src/loader.js';
 import { makeProjectRealAutoexec } from '../src/project-real.js';
 import { runBatch } from '../src/batch.js';
 import { loadConfig } from '../src/config.js';
-import type { AgentRunner } from '../src/agent.js';
+import { AgentRunner } from '../src/agent.js';
 import { AccountRegistry } from '../src/account-registry.js';
 
 const log = { info() {}, error() {} };
@@ -95,17 +95,19 @@ test('retry cannot collide with another active session', () => {
   } finally { store.close(); }
 });
 
-test('SQLite retains sessions, baselines and execute claims after reopen', () => {
+test('SQLite retains sessions, baselines, execute claims and CLI threads after reopen', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pipeline-persistence-'));
   try {
     const path = join(dir, 'sessions.sqlite');
     const first = new Store(path);
     const row = first.create('123456', '123456', 'alpha').session;
-    first.transition(row.id, 'launching'); first.baseline(row.id, ['old-instance']); first.claim(row, 'new-instance'); first.close();
+    first.transition(row.id, 'launching'); first.baseline(row.id, ['old-instance']); first.claim(row, 'new-instance');
+    first.setAgentThread(row.worker_id, 'thread-123'); first.close();
     const reopened = new Store(path);
     assert.equal(reopened.get(row.id)!.status, 'launching');
     assert.equal(reopened.isBaseline(row.id, 'old-instance'), true);
     assert.equal(reopened.claim(row, 'new-instance'), false);
+    assert.equal(reopened.agentThread(row.worker_id), 'thread-123');
     reopened.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -318,6 +320,12 @@ test('HTTP endpoints authenticate, reject stale callbacks, save findings and enf
     assert.equal((await call('/launch', { links: ['123456'], alias: 'alpha' })).status, 200);
     assert.equal((await call('/launch', { links: ['bad'], alias: 'alpha' })).status, 400);
     assert.equal((await call('/status')).status, 200);
+    const events = await call('/events');
+    assert.match(events.headers.get('content-type') ?? '', /^text\/event-stream/);
+    const eventReader = events.body!.getReader();
+    const firstEvent = await eventReader.read();
+    assert.match(new TextDecoder().decode(firstEvent.value), /"sessions":\[/);
+    await eventReader.cancel();
     const row = f.store.all()[0]!;
     const body = { worker_id: row.worker_id };
     const prefix = `/internal/sessions/${row.id}`;
@@ -378,6 +386,25 @@ test('prompt console persists one isolated run per connected worker', async () =
     await new Promise<void>(resolve => server.close(() => resolve()));
     await f.pipeline.stop(); f.store.close();
   }
+});
+
+test('CLI MCP proxy hides worker selection and enforces the assigned worker', async () => {
+  let invocation: { name: string; arguments: Record<string, unknown> } | undefined;
+  const mcp = {
+    async tools() { return [{ name: 'list-remotes', description: 'List', inputSchema: {
+      type: 'object', properties: { workerId: { type: 'string' }, path: { type: 'string' } }, required: ['workerId'],
+    } }]; },
+    async callTool(name: string, args: Record<string, unknown>) { invocation = { name, arguments: args }; return { ok: true }; },
+  };
+  const runner = new AgentRunner(process.platform === 'win32' ? 'node.exe' : 'node', 'test-model', 'http://127.0.0.1:3000', callbackToken, mcp as never);
+  assert.equal(runner.configured, true);
+  const listed = await runner.mcpRpc('worker-real', { jsonrpc: '2.0', id: 1, method: 'tools/list' }) as { result: { tools: Array<{ inputSchema: { properties: Record<string, unknown>; required: string[] } }> } };
+  assert.equal(listed.result.tools[0]!.inputSchema.properties.workerId, undefined);
+  assert.deepEqual(listed.result.tools[0]!.inputSchema.required, []);
+  await runner.mcpRpc('worker-real', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+    name: 'list-remotes', arguments: { workerId: 'worker-evil', path: 'ReplicatedStorage' },
+  } });
+  assert.deepEqual(invocation, { name: 'list-remotes', arguments: { workerId: 'worker-real', path: 'ReplicatedStorage' } });
 });
 
 test('account management imports into RAM and persists only the username mapping', async () => {

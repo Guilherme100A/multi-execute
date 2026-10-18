@@ -17,7 +17,7 @@ const pipeline = new Pipeline(store,
   ram,
   mcp,
   config.accounts, config.authorized, log, Date.now, config.healthIntervalMs, config.launchTimeoutMs, config.injectionMode);
-const agent = new AgentRunner(config.openaiApiKey, config.openaiModel, mcp);
+const agent = new AgentRunner(config.agentCliCommand, config.agentModel, `http://${config.host}:${config.port}`, config.callbackToken, mcp);
 const server = createApp(pipeline, config.token, config.callbackToken, config.autoexecToken, config.findingsDirectory, log, agent, config.accounts, accountRegistry, ram).listen(config.port, config.host, () => {
   log.info('server_started', { host: config.host, port: config.port });
   console.log(`Authorized pipeline: http://${config.host}:${config.port}`);

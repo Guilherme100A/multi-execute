@@ -71,9 +71,9 @@
       </div>
 
       <div id="consoleView" class="view" hidden>
-        <section class="terminal card">
+        <section class="console-shell">
           <div class="terminal-head">
-            <div><p class="label">AGENTE</p><h2>Console de análise</h2></div>
+            <div><p class="label">AGENTES AO VIVO</p><h2>Terminais das sessões</h2><p class="muted">Cada worker possui contexto, histórico e prompt isolados.</p></div>
             <div class="terminal-badges"><button id="policyToggle" type="button" class="ghost compact">AGENTS.md global</button><span id="model" class="model"></span></div>
           </div>
           <form id="policyEditor" class="policy-editor" hidden>
@@ -85,15 +85,13 @@
             <textarea id="policyContent" rows="8" maxlength="65536" placeholder="# AGENTS.md&#10;&#10;Instruções compartilhadas para todas as sessões…"></textarea>
             <p id="policyMessage" class="message"></p>
           </form>
-          <div id="terminalOutput" class="terminal-output"><p class="hint">Selecione uma sessão conectada e envie uma instrução.</p></div>
-          <form id="promptForm" class="prompt-form">
-            <textarea id="prompt" rows="3" maxlength="8000" placeholder="Ex.: liste os remotes e identifique validações que precisam ser reforçadas" required></textarea>
-            <div class="prompt-actions">
-              <label class="toggle"><input id="broadcast" type="checkbox"><span></span>Enviar para todas conectadas</label>
-              <button id="sendPrompt">Enviar prompt</button>
-            </div>
+          <form id="promptForm" class="broadcast-bar card">
+            <div><p class="label">PROMPT EM MASSA</p><p class="muted">Envia a mesma instrução para todas as sessões conectadas.</p></div>
+            <textarea id="prompt" rows="2" maxlength="8000" placeholder="Ex.: liste os remotes e identifique validações que precisam ser reforçadas" required></textarea>
+            <button id="sendPrompt">Enviar para todas</button>
           </form>
           <p id="promptError" class="error"></p>
+          <div id="terminalGrid" class="terminal-grid"></div>
         </section>
       </div>
     </main>

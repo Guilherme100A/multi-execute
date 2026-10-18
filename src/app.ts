@@ -27,9 +27,30 @@ export function createApp(pipeline: Pipeline, token: string, callbackToken: stri
   app.use(express.json({ limit: '1mb' }));
   app.get('/config', (_req, res) => res.json({
     accounts: accounts.map(account => ({ alias: account.alias, username: account.robloxUsername })),
-    agent: { configured: agent?.configured ?? false, model: agent?.model ?? null },
+    agent: { configured: agent?.configured ?? false, model: agent?.model ?? null, provider: 'Codex CLI' },
   }));
   app.get('/status', (_req, res) => res.json({ mcp_online: pipeline.online, queue_paused: !pipeline.online, sessions: pipeline.store.all() }));
+  app.get('/events', (req, res) => {
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    let previous = '';
+    const send = () => {
+      const payload = JSON.stringify({
+        mcp_online: pipeline.online,
+        queue_paused: !pipeline.online,
+        sessions: pipeline.store.all(),
+        runs: pipeline.store.prompts(),
+      });
+      if (payload !== previous) { previous = payload; res.write(`data: ${payload}\n\n`); }
+    };
+    send();
+    const updates = setInterval(send, 750);
+    const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 15_000);
+    req.on('close', () => { clearInterval(updates); clearInterval(heartbeat); });
+  });
   app.get('/accounts/ram', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     if (!ramAccounts) { res.status(503).json({ error: 'RAM account management is unavailable' }); return; }
@@ -85,17 +106,21 @@ export function createApp(pipeline: Pipeline, token: string, callbackToken: stri
     res.json({ policy });
   });
   app.post('/prompts', (req, res) => {
-    if (!agent?.configured) throw new InputError('Configure OPENAI_API_KEY to use the prompt console');
+    if (!agent?.configured) throw new InputError('Install and authenticate the configured agent CLI to use the prompt console');
     const prompt = req.body?.prompt;
     if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 8000) throw new InputError('prompt must contain 1–8000 characters');
     const available = pipeline.store.all().filter(row => ['connected', 'analyzing'].includes(row.status));
     const targets = req.body?.scope === 'all' ? available : available.filter(row => row.id === req.body?.session_id);
     if (!targets.length) throw new ConflictError('No connected target session');
+    const busy = new Set(pipeline.store.prompts().filter(run => ['queued', 'running'].includes(run.status)).map(run => run.worker_id));
+    if (targets.some(session => busy.has(session.worker_id))) throw new ConflictError('One or more target terminals are already running a prompt');
     const runs = targets.map(session => pipeline.store.createPrompt(session, prompt.trim()));
     for (const run of runs) void (async () => {
       pipeline.store.updatePrompt(run.id, 'running');
       try {
-        const output = await agent.run(run.worker_id, run.prompt, pipeline.store.agentPolicy()?.content ?? '');
+        const output = await agent.run(run.worker_id, run.prompt, pipeline.store.agentPolicy()?.content ?? '', transcript => {
+          pipeline.store.updatePrompt(run.id, 'running', transcript);
+        }, pipeline.store.agentThread(run.worker_id), threadId => pipeline.store.setAgentThread(run.worker_id, threadId));
         pipeline.store.updatePrompt(run.id, 'done', output);
       } catch (error) {
         pipeline.store.updatePrompt(run.id, 'failed', null, error instanceof Error ? error.message : String(error));
@@ -114,6 +139,14 @@ export function createApp(pipeline: Pipeline, token: string, callbackToken: stri
   app.post('/internal/autoexec/register', (req, res) => {
     const session = pipeline.registerAutoexec(req.body?.username, req.body?.place_id);
     res.json({ session_id: session.id, worker_id: session.worker_id, loader_url: 'http://127.0.0.1:28429/mcp.lua' });
+  });
+  app.post('/internal/mcp/:workerId', async (req, res) => {
+    if (!agent) { res.status(503).json({ error: 'Agent CLI is unavailable' }); return; }
+    const session = pipeline.store.all().find(row => row.worker_id === req.params.workerId);
+    if (!session || !['connected', 'analyzing'].includes(session.status)) { res.status(409).json({ error: 'Worker is not connected' }); return; }
+    const response = await agent.mcpRpc(session.worker_id, req.body);
+    if (response === undefined) { res.status(204).end(); return; }
+    res.json(response);
   });
   for (const status of ['analyzing', 'done', 'failed'] as const) {
     app.post(`/internal/sessions/:id/${status}`, (req, res) => {
