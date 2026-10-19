@@ -6,6 +6,7 @@ import { dirname } from 'node:path';
 export type Status = 'pending' | 'launching' | 'connected' | 'analyzing' | 'done' | 'failed' | 'disconnected';
 export interface Session {
   id: string; link: string; place_id: string; account_alias: string; worker_id: string;
+  group_id: string; group_mode: 'single' | 'same-game' | 'multi-game';
   status: Status; last_error: string | null; retry_count: number;
   created_at: number; updated_at: number; launching_at: number | null;
   connected_at: number | null; finished_at: number | null; instance_id: string | null;
@@ -61,18 +62,22 @@ export class Store {
     if (!promptColumns.some(row=>row.name==='provider')) this.db.exec("ALTER TABLE prompt_runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'codex'");
     if (!promptColumns.some(row=>row.name==='model')) this.db.exec("ALTER TABLE prompt_runs ADD COLUMN model TEXT NOT NULL DEFAULT ''");
     this.db.exec('CREATE TABLE IF NOT EXISTS agent_settings (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL, model TEXT NOT NULL)');
+    const sessionColumns=this.db.prepare('PRAGMA table_info(sessions)').all() as {name:string}[];
+    if (!sessionColumns.some(row=>row.name==='group_id')) this.db.exec('ALTER TABLE sessions ADD COLUMN group_id TEXT');
+    if (!sessionColumns.some(row=>row.name==='group_mode')) this.db.exec("ALTER TABLE sessions ADD COLUMN group_mode TEXT NOT NULL DEFAULT 'single'");
+    this.db.exec("UPDATE sessions SET group_id=id WHERE group_id IS NULL OR group_id=''");
   }
   get(id: string): Session | undefined { return this.db.prepare('SELECT * FROM sessions WHERE id=?').get(id) as Session | undefined; }
   all(): Session[] { return this.db.prepare('SELECT * FROM sessions ORDER BY created_at,rowid').all() as unknown as Session[]; }
   private worker(alias: string): string { return `${alias}-${this.now()}-${randomUUID()}`; }
-  create(link: string, place: string, alias: string): { session: Session; reused: boolean } {
+  create(link: string, place: string, alias: string, groupId = randomUUID(), groupMode: Session['group_mode'] = 'single'): { session: Session; reused: boolean } {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const active = this.db.prepare("SELECT * FROM sessions WHERE account_alias=? AND place_id=? AND status IN ('pending','launching','connected','analyzing')").get(alias, place) as Session | undefined;
       if (active) { this.db.exec('COMMIT'); return { session: active, reused: true }; }
       const id = randomUUID(), timestamp = this.now();
-      this.db.prepare("INSERT INTO sessions(id,link,place_id,account_alias,worker_id,status,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)")
-        .run(id, link, place, alias, this.worker(alias), timestamp, timestamp);
+      this.db.prepare("INSERT INTO sessions(id,link,place_id,account_alias,worker_id,status,created_at,updated_at,group_id,group_mode) VALUES(?,?,?,?,?,'pending',?,?,?,?)")
+        .run(id, link, place, alias, this.worker(alias), timestamp, timestamp, groupId, groupMode);
       this.db.exec('COMMIT'); return { session: this.get(id)!, reused: false };
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }

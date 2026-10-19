@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 
 test('live updates preserve drafts, focus and scroll; disconnected games leave the workspace; stream reconnects', async ({ page }, info) => {
   test.setTimeout(30_000);
-  const sessions = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'old'].map((alias, i, rows) => ({ id: alias, account_alias: alias, worker_id: `worker-${alias}`, place_id: `${123456+i}`, status: i===rows.length-1 ? 'failed' : 'connected', retry_count: 1 }));
+  const sessions = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'old'].map((alias, i, rows) => ({ group_id: i < 4 ? 'same-game-group' : i < 7 ? 'multi-game-group' : 'old-group', group_mode: i < 4 ? 'same-game' : 'multi-game', id: alias, account_alias: alias, worker_id: `worker-${alias}`, place_id: `${123456+i}`, status: i===rows.length-1 ? 'failed' : 'connected', retry_count: 1 }));
   let snapshot = { mcp_online: true, sessions, runs: [{ id:'run',session_id:'alpha',worker_id:'worker-alpha',prompt:'Observação',response:'Linha de resultado\n'.repeat(100),status:'running',updated_at:1 }] };
   let stream: ServerResponse | undefined;
   let connections=0;
@@ -17,7 +17,7 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
     }
     if (path==='/agent-settings') { let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{choice=JSON.parse(body);res.setHeader('content-type','application/json');res.end(JSON.stringify({selection:choice}));});return; }
     if (path==='/config') { res.setHeader('content-type','application/json'); res.end(JSON.stringify({accounts:['alpha','beta','gamma'].map(alias=>({alias,username:alias})),agent:{configured:true,provider:choice.provider==='claude'?'Claude Code':'Codex CLI',model:choice.model,selection:choice,providers:[{id:'codex',label:'Codex CLI',installed:true,models:[{id:'test',label:'Test model'}]},{id:'claude',label:'Claude Code',installed:true,models:[{id:'sonnet',label:'Sonnet'},{id:'opus',label:'Opus'}]}]}})); return; }
-    if (path==='/launch-group') { let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{groupLaunch=JSON.parse(body);res.statusCode=202;res.setHeader('content-type','application/json');res.end(JSON.stringify({sessions:groupLaunch!.aliases.map(alias=>({session:{id:alias}}))}));});return; }
+    if (path==='/launch-group') { let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{groupLaunch=JSON.parse(body);res.statusCode=202;res.setHeader('content-type','application/json');res.end(JSON.stringify({sessions:groupLaunch!.aliases.map(alias=>({session:{id:alias,group_id:'same-game-group'}}))}));});return; }
     if (path==='/status' || path==='/prompts') { res.setHeader('content-type','application/json'); res.end(JSON.stringify(path==='/status'?snapshot:{runs:snapshot.runs})); return; }
     const files: Record<string,string>={'/':'index.html','/app.js':'app.js','/styles.css':'styles.css'};
     if (!files[path]) {res.writeHead(404);res.end();return;}
@@ -29,7 +29,7 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
   let navigations=0; page.on('framenavigated',frame=>{if(frame===page.mainFrame()) navigations++;});
   try {
     await page.goto(`http://127.0.0.1:${address.port}`);
-    await expect(page.locator('#navSessionCount')).toHaveText('7');
+    await expect(page.locator('#navSessionCount')).toHaveText('2');
     await page.locator('[data-view="group"]').click();
     await expect(page.locator('#accountChoices .account-choice')).toHaveCount(3);
     await expect(page.locator('#accountChoices input:checked')).toHaveCount(3);
@@ -39,6 +39,15 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
     await expect.poll(()=>groupLaunch).toEqual({link:'https://www.roblox.com/games/123456/Test',aliases:['alpha','beta','gamma']});
     await page.locator('[data-view="console"]').click();
     await expect(page.locator('.worker-terminal')).toHaveCount(7);
+    await expect(page.locator('.worker-terminal:visible')).toHaveCount(4);
+    await expect(page.locator('#batchTerminalOutput')).toContainText('[alpha]');
+    await expect(page.locator('#batchTerminalOutput')).not.toContainText('[epsilon]');
+    await page.locator('#workspaceTabs [data-group-id="multi-game-group"]').click();
+    await expect(page.locator('.worker-terminal:visible')).toHaveCount(3);
+    await expect(page.locator('#batchTerminalOutput')).toContainText('[epsilon]');
+    await expect(page.locator('#batchTerminalOutput')).not.toContainText('[alpha]');
+    await expect(page.locator('.worker-terminal[data-session-id="alpha"]')).toBeHidden();
+    await page.locator('#workspaceTabs [data-group-id="same-game-group"]').click();
     const input=page.locator('.worker-terminal[data-session-id="alpha"] textarea');
     const output=page.locator('.worker-terminal[data-session-id="alpha"] .worker-terminal-output');
     await input.fill('Meu rascunho ainda não enviado');
@@ -50,7 +59,7 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
     expect(await output.evaluate(element=>element.scrollTop)).toBe(100);
     sessions[1]!.status='disconnected'; stream!.write(`data: ${JSON.stringify(snapshot)}\n\n`);
     await expect(page.locator('.worker-terminal')).toHaveCount(6);
-    await expect(page.locator('#navSessionCount')).toHaveText('6');
+    await expect(page.locator('#navSessionCount')).toHaveText('2');
     await expect(page.locator('#historyCount')).toHaveText('2');
     // A normal EOF must reconnect, just like a network failure.
     stream!.end();
@@ -71,7 +80,7 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
     await page.setViewportSize({width:390,height:844});
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.locator('[data-view="sessions"]').click();
-    await expect(page.locator('#sessions .session')).toHaveCount(6);
+    await expect(page.locator('#sessions .session')).toHaveCount(2);
     await expect(page.locator('#sessionHistory')).not.toHaveAttribute('open','');
     await page.locator('#sessionHistory summary').click();
     await expect(page.locator('#historySessions .session')).toHaveCount(2);

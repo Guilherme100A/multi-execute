@@ -120,7 +120,9 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
     const prompt = req.body?.prompt;
     if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 8000) throw new InputError('prompt must contain 1–8000 characters');
     const available = pipeline.store.all().filter(row => ['connected', 'analyzing'].includes(row.status));
-    const targets = req.body?.scope === 'all' ? available : available.filter(row => row.id === req.body?.session_id);
+    const targets = req.body?.scope === 'all' ? available : req.body?.scope === 'group'
+      ? available.filter(row => row.group_id === req.body?.group_id)
+      : available.filter(row => row.id === req.body?.session_id);
     if (!targets.length) throw new ConflictError('No connected target session');
     const busy = new Set(pipeline.store.prompts().filter(run => ['queued', 'running'].includes(run.status)).map(run => run.worker_id));
     if (targets.some(session => busy.has(session.worker_id))) throw new ConflictError('One or more target terminals are already running a prompt');

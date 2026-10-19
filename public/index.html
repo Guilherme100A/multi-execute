@@ -5,19 +5,20 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Multi · Workspace</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" type="image/png" href="/assets/terminal-roblox/roblox-04.png">
 </head>
 <body>
   <div class="shell">
     <header>
-      <div><span class="eyebrow">ROBLOX WORKSPACE</span><h1>Multi<span class="brand-mark"> /</span></h1></div>
+      <div class="brand-lockup"><img class="brand-logo" src="/assets/terminal-roblox/roblox-04.png" alt="" width="56" height="56"><div><span class="eyebrow">ROBLOX WORKSPACE</span><h1>Multi<span class="brand-mark"> /</span></h1></div></div>
       <div class="header-actions"><a class="architecture-link" href="/architecture.html">Como funciona</a><div class="health"><span id="healthDot" class="dot"></span><span id="healthText">Conectando…</span></div></div>
     </header>
 
     <main id="dashboard">
       <nav class="app-nav" aria-label="Navegação principal">
         <button type="button" class="nav-button active" data-view="accounts">Contas</button>
-        <button type="button" class="nav-button" data-view="group">10 contas <b class="nav-arrow">→</b> 1 jogo</button>
-        <button type="button" class="nav-button" data-view="games">10 contas <b class="nav-arrow">→</b> 10 jogos</button>
+        <button type="button" class="nav-button" data-view="group">Multi-instância · Um jogo</button>
+        <button type="button" class="nav-button" data-view="games">Multi-instância · Vários jogos</button>
         <button type="button" class="nav-button" data-view="sessions">Sessões <span id="navSessionCount">0</span></button>
         <button type="button" class="nav-button" data-view="console">Terminais ao vivo</button>
         <span id="feedState" class="feed-state" role="status">Conectando atualizações…</span>
@@ -26,29 +27,39 @@
       <div id="accountsView" class="view">
       <section id="accountManager" class="accounts-panel card">
         <div class="section-title">
-          <div><p class="label">CONTAS LOCAIS</p><h2>Adicionar e organizar contas</h2><p class="muted">As sessões ficam criptografadas pelo Windows neste computador.</p></div>
+          <div><p class="label">SEU ESPAÇO</p><h2>Contas</h2><p class="muted">Cadastre uma conta por vez ou prepare uma importação em lote.</p></div>
         </div>
-        <div class="account-grid">
+        <div class="account-methods" aria-label="Método de cadastro">
+          <button type="button" class="active" data-account-method="individual" aria-pressed="true"><b>Cadastro individual</b><span>Adicione uma conta ao seu espaço</span></button>
+          <button type="button" data-account-method="txt" aria-pressed="false"><b>Importar TXT</b><span>Várias contas em um arquivo</span></button>
+        </div>
+        <div id="individualAccounts" class="account-grid">
           <form id="syncAccountForm" class="account-form">
-            <div><p class="label">JÁ IMPORTADA</p><h3>Sincronizar conta</h3></div>
+            <div><p class="label">CONTA EXISTENTE</p><h3>Usar uma conta salva</h3><p class="muted">Escolha uma conta local e dê um nome para identificá-la.</p></div>
             <label>Conta encontrada<select id="ramAccount" required></select></label>
             <label>Nome dentro do Launcher<input id="syncAlias" placeholder="conta-principal" required></label>
-            <button>Adicionar ao Launcher</button>
+            <button>Adicionar conta</button>
           </form>
           <form id="importAccountForm" class="account-form sensitive">
-            <div><p class="label">NOVA CONTA</p><h3>Importar com cookie</h3></div>
+            <div><p class="label">NOVA CONTA</p><h3>Cadastrar conta</h3><p class="muted">O método atual utiliza uma sessão Roblox existente.</p></div>
             <label>Nome dentro do Launcher<input id="importAlias" placeholder="conta-teste" required></label>
             <label>Cookie de sessão Roblox<input id="securityCookie" type="password" autocomplete="off" placeholder="_ | WARNING:-DO-NOT-SHARE-THIS..." required></label>
             <button>Salvar conta local</button>
           </form>
         </div>
+        <section id="txtAccounts" class="txt-import" hidden>
+          <div><p class="label">IMPORTAÇÃO EM LOTE</p><h3>Adicione seu arquivo de contas</h3><p class="muted">O formato das linhas será definido na próxima etapa.</p></div>
+          <label class="txt-dropzone" for="accountsTxt"><span class="txt-file-icon" aria-hidden="true">TXT</span><strong>Selecionar arquivo .txt</strong><span>Escolha um arquivo no computador</span><input id="accountsTxt" type="file" accept=".txt,text/plain"></label>
+          <p id="txtFileStatus" class="muted" role="status">Nenhum arquivo selecionado.</p>
+          <div class="txt-import-footer"><p class="muted">Prévia de interface: o arquivo não será lido, enviado ou importado.</p><button type="button" disabled>Importar contas · Em breve</button></div>
+        </section>
         <p id="accountMessage" class="message"></p>
       </section>
       </div>
 
       <div id="groupView" class="view" hidden>
       <section class="launch card">
-        <div><p class="label">10 CONTAS · 1 JOGO</p><h2>Equipe no mesmo jogo</h2><p class="muted launch-description">Escolha até 10 contas. Todas entram no mesmo PlaceId com workers e terminais independentes.</p></div>
+        <div><p class="label">MULTI-INSTÂNCIA</p><h2>Um jogo</h2><p class="muted launch-description">Várias contas no mesmo jogo, cada uma com seu terminal. Selecione até 10 contas por lote.</p></div>
         <form id="groupLaunchForm">
           <div class="launch-fields">
             <label class="wide">Link do jogo<input id="groupGame" placeholder="https://www.roblox.com/games/123456789" required></label>
@@ -65,7 +76,7 @@
 
       <div id="gamesView" class="view" hidden>
       <section class="launch card">
-        <div><p class="label">10 CONTAS · 10 JOGOS</p><h2>Distribuir jogos</h2><p class="muted launch-description">Cole até 10 links. Cada linha será atribuída a uma conta diferente, na mesma ordem.</p></div>
+        <div><p class="label">MULTI-INSTÂNCIA</p><h2>Vários jogos</h2><p class="muted launch-description">Uma conta por jogo, organizadas no mesmo lote. Cole até 10 links, um por linha.</p></div>
         <form id="gamesLaunchForm">
           <div class="launch-fields">
             <label>Começar pela conta<select id="account" required></select></label>
@@ -91,7 +102,7 @@
       <div id="consoleView" class="view" hidden>
         <section class="console-shell">
           <div class="terminal-head">
-            <div><p class="label">SEU WORKSPACE</p><h2>Terminais ao vivo</h2><p class="muted">Um agente por sessão. Dez contas no mesmo jogo continuam com terminais independentes.</p></div>
+            <div><p class="label">SEU WORKSPACE</p><h2>Terminais ao vivo</h2><p class="muted">Cada conta tem seu terminal. Organize e acompanhe as instâncias por lote.</p></div>
             <div class="terminal-badges"><button id="policyToggle" type="button" class="ghost compact">AGENTS.md global</button><span id="model" class="model"></span></div>
           </div>
           <form id="agentSettingsForm" class="agent-settings card">
@@ -110,10 +121,19 @@
             <textarea id="policyContent" rows="8" maxlength="65536" placeholder="# AGENTS.md&#10;&#10;Instruções compartilhadas para todas as sessões…"></textarea>
             <p id="policyMessage" class="message"></p>
           </form>
+          <div id="workspaceTabs" class="workspace-tabs" aria-label="Sessões de trabalho"></div>
+          <section class="batch-terminal card" aria-labelledby="batchTerminalTitle">
+            <div class="worker-terminal-head">
+              <span class="window-controls" aria-hidden="true"><i></i><i></i><i></i></span>
+              <div><h3 id="batchTerminalTitle">Terminal geral do lote</h3><p id="batchTerminalSummary" class="worker-id"></p></div>
+              <span class="status">ACOMPANHAMENTO</span>
+            </div>
+            <div id="batchTerminalOutput" class="worker-terminal-output" role="region" aria-label="Saídas das contas do lote" tabindex="0"></div>
+          </section>
           <form id="promptForm" class="broadcast-bar card">
-            <div><p class="label">PROMPT EM MASSA</p><p class="muted">Envia a mesma instrução para todas as sessões conectadas.</p></div>
+            <div><p class="label">PROMPT DA SESSÃO</p><p id="broadcastScope" class="muted">Envia a instrução apenas aos workers desta sessão.</p></div>
             <textarea id="prompt" rows="2" maxlength="8000" placeholder="Ex.: liste os remotes e identifique validações que precisam ser reforçadas" required></textarea>
-            <button id="sendPrompt">Enviar para todas</button>
+            <button id="sendPrompt">Enviar para esta sessão</button>
           </form>
           <p id="promptError" class="error"></p>
           <div id="terminalGrid" class="terminal-grid"></div>

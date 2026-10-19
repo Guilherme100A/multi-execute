@@ -3,6 +3,7 @@ import type { Logger } from './logger.js';
 import { makeLoader } from './loader.js';
 import { ConflictError, Store, type Session } from './store.js';
 import { InputError, placeId, aliasValue, type Account } from './validation.js';
+import { randomUUID } from 'node:crypto';
 
 export class Pipeline {
   online = false;
@@ -37,7 +38,8 @@ export class Pipeline {
     for (const alias of selected) if (!this.accounts.some(account => account.alias === alias)) throw new InputError(`Unknown account alias: ${alias}`);
     const game = placeId(link);
     if (!this.authorized.has(game)) throw new InputError(`PlaceId ${game} is not in AUTHORIZED_PLACE_IDS`);
-    const result = selected.map(alias => this.store.create(link, game, alias));
+    const groupId = randomUUID();
+    const result = selected.map(alias => this.store.create(link, game, alias, groupId, 'same-game'));
     this.log.info('launch_group_queued', { place_id: game, accounts: selected, ids: result.map(row => row.session.id) });
     this.kick(); return result;
   }
@@ -48,7 +50,10 @@ export class Pipeline {
     if (!Array.isArray(links) || !links.length || links.length > Math.min(this.accounts.length, 10)) throw new InputError('Informe no máximo 10 links, limitados às contas disponíveis');
     const games = links.map(placeId);
     for (const game of games) if (!this.authorized.has(game)) throw new InputError(`PlaceId ${game} is not in AUTHORIZED_PLACE_IDS`);
-    return links.flatMap((link, offset) => this.launch([link], this.accounts[(index + offset) % this.accounts.length]!.alias));
+    const groupId = randomUUID();
+    const result = links.map((link, offset) => this.store.create(String(link), games[offset]!, this.accounts[(index + offset) % this.accounts.length]!.alias, groupId, 'multi-game'));
+    this.log.info('launch_batch_queued', { group_id: groupId, ids: result.map(row => row.session.id) });
+    this.kick(); return result;
   }
   launch(links: unknown, alias: unknown): { session: Session; reused: boolean }[] {
     const account = aliasValue(alias);
@@ -57,7 +62,8 @@ export class Pipeline {
     // Validate the entire batch before creating any rows.
     const games = links.map(link => ({ link: link as string, place: placeId(link) }));
     for (const game of games) if (!this.authorized.has(game.place)) throw new InputError(`PlaceId ${game.place} is not in AUTHORIZED_PLACE_IDS`);
-    const result = games.map(game => this.store.create(game.link, game.place, account));
+    const groupId = randomUUID();
+    const result = games.map(game => this.store.create(game.link, game.place, account, groupId, games.length > 1 ? 'multi-game' : 'single'));
     this.log.info('launch_queued', { ids: result.map(row => row.session.id) });
     this.kick(); return result;
   }

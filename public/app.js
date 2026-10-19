@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
 let selected = null;
+let selectedGroup = null;
 let agentConfigured = false;
 let liveController = null;
 let snapshotVersion = 0;
@@ -11,6 +12,12 @@ let currentAgent=null;
 let launchAccounts=[];
 const liveStatuses = new Set(['connected', 'analyzing']);
 const labels = {connected:'Conectada', analyzing:'Analisando', pending:'Na fila', launching:'Conectando', failed:'Falhou', disconnected:'Desconectada', done:'Concluída'};
+const groupModeLabels = {'same-game':'Multi-instância · Um jogo','multi-game':'Multi-instância · Vários jogos',single:'Sessão individual'};
+
+function groupId(row){return row.group_id || row.id;}
+function grouped(rows){const map=new Map();for(const row of rows){const id=groupId(row);if(!map.has(id))map.set(id,[]);map.get(id).push(row);}return [...map.entries()].map(([id,workers])=>({id,workers,mode:workers[0].group_mode||'single',created_at:Math.min(...workers.map(row=>row.created_at||0))}));}
+function groupStatus(workers){for(const state of ['analyzing','connected','launching','pending','disconnected','failed','done'])if(workers.some(row=>row.status===state))return state;return workers[0]?.status||'pending';}
+function groupTitle(group){const places=new Set(group.workers.map(row=>row.place_id));return group.mode==='same-game'?`${group.workers.length} contas · Place ${group.workers[0].place_id}`:group.mode==='multi-game'?`${group.workers.length} contas · ${places.size} jogos`:`${group.workers[0].account_alias} · Place ${group.workers[0].place_id}`;}
 
 function setFeedConnected(connected) {
   feedConnected = connected;
@@ -213,6 +220,7 @@ function renderTerminalBoard(sessions, runs) {
     let panel=grid.querySelector(`[data-session-id="${session.id}"]`);
     if (!panel) panel=createTerminal(session);
     panel.classList.toggle('selected',selected===session.id);
+    panel.hidden=selectedGroup!==null && groupId(session)!==selectedGroup;
     panel.querySelector('.worker-title').textContent=session.account_alias;
     panel.querySelector('.worker-id').textContent=`Place ${session.place_id} · ${session.worker_id}`;
     panel.querySelector('.worker-id').title=session.worker_id;
@@ -229,20 +237,43 @@ function renderTerminalBoard(sessions, runs) {
 }
 
 function renderSessionList(container, rows, emptyText) {
-  const signature=JSON.stringify(rows.map(row=>[row.id,row.status,row.last_error,row.retry_count,selected===row.id]));
+  const groups=grouped(rows);
+  const signature=JSON.stringify(groups.map(group=>[group.id,...group.workers.map(row=>[row.id,row.status,row.last_error,row.retry_count]),selectedGroup===group.id]));
   if (container.dataset.signature===signature) return;
   container.dataset.signature=signature;
-  const ids=new Set(rows.map(row=>row.id));
-  for (const card of container.querySelectorAll('.session')) if (!ids.has(card.dataset.sessionId)) card.remove();
-  container.querySelector('.sessions-empty')?.remove();
-  for (const row of rows) {
-    let card=container.querySelector(`[data-session-id="${row.id}"]`);
-    const key=JSON.stringify([row.status,row.last_error,row.retry_count,selected===row.id]);
-    if (!card) { card=sessionCard(row); container.append(card); }
-    else if (card.dataset.key!==key) { const replacement=sessionCard(row); card.replaceWith(replacement); card=replacement; }
-    card.dataset.key=key;
+  container.replaceChildren(...groups.map((group,index)=>{
+    const card=document.createElement('article');card.className=`session session-group${selectedGroup===group.id?' selected':''}`;card.dataset.groupId=group.id;card.tabIndex=0;
+    const state=groupStatus(group.workers);const top=document.createElement('div');top.className='session-top';
+    const identity=document.createElement('div');identity.className='session-identity';const emblem=document.createElement('span');emblem.className='session-emblem';emblem.textContent=String(index+1).padStart(2,'0');
+    const names=document.createElement('span');const kicker=document.createElement('small');kicker.className='group-mode';kicker.textContent=groupModeLabels[group.mode];const title=document.createElement('b');title.className='session-name';title.textContent=groupTitle(group);names.append(kicker,title);identity.append(emblem,names);
+    const badge=document.createElement('span');badge.className=`status ${state}`;badge.textContent=labels[state]||state;top.append(identity,badge);
+    const workers=document.createElement('div');workers.className='group-workers';for(const row of group.workers){const chip=document.createElement('span');chip.className=`worker-chip ${row.status}`;chip.textContent=`${row.account_alias} · ${row.place_id}`;workers.append(chip);}
+    const footer=document.createElement('div');footer.className='session-footer';const count=document.createElement('span');count.className='group-count';count.textContent=`${group.workers.length} worker${group.workers.length===1?'':'s'}`;const action=document.createElement('span');action.className='session-action';action.textContent='ABRIR TERMINAIS →';footer.append(count,action);card.append(top,workers,footer);
+    const open=()=>{const live=group.workers.filter(row=>liveStatuses.has(row.status));if(!live.length||!feedConnected)return;selectedGroup=group.id;selected=live[0].id;showView('console');if(lastSnapshot)applySnapshot(...lastSnapshot);};card.onclick=open;card.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();open();}};return card;
+  }));
+  if (!groups.length && emptyText) { const empty=document.createElement('p'); empty.className='sessions-empty'; empty.textContent=emptyText; container.append(empty); }
+}
+
+function renderWorkspaceTabs(sessions){const groups=grouped(sessions);if(groups.length&&!groups.some(group=>group.id===selectedGroup))selectedGroup=groups[0].id;const tabs=$('workspaceTabs');tabs.replaceChildren(...groups.map((group,index)=>{const button=document.createElement('button');button.type='button';button.className=selectedGroup===group.id?'active':'';button.dataset.groupId=group.id;button.innerHTML=`<span>Sessão ${String(index+1).padStart(2,'0')}</span><b>${groupModeLabels[group.mode]}</b><small>${group.workers.length} workers</small>`;button.onclick=()=>{selectedGroup=group.id;selected=group.workers[0]?.id||null;if(lastSnapshot)applySnapshot(...lastSnapshot);};return button;}));const active=groups.find(group=>group.id===selectedGroup);$('broadcastScope').textContent=active?`${groupModeLabels[active.mode]} · ${active.workers.length} workers selecionados.`:'Nenhuma sessão conectada.';}
+
+function renderBatchTerminal(sessions, runs) {
+  const members=sessions.filter(row=>groupId(row)===selectedGroup);
+  const ids=new Set(members.map(row=>row.id));
+  const output=$('batchTerminalOutput');
+  const relevant=runs.filter(run=>ids.has(run.session_id)).slice(0,100);
+  const signature=JSON.stringify([selectedGroup,feedConnected,members.map(row=>[row.id,row.status]),relevant]);
+  if(output.dataset.signature===signature)return;
+  const follow=output.scrollHeight-output.scrollTop-output.clientHeight<48;
+  const scroll=output.dataset.groupId===selectedGroup?output.scrollTop:0;
+  output.dataset.signature=signature;output.dataset.groupId=selectedGroup||'';
+  $('batchTerminalSummary').textContent=`${members.length} contas · ${feedConnected?'atualização ao vivo':'conexão interrompida'}`;
+  const lines=members.map(row=>`[${row.account_alias}] ${labels[row.status]||row.status} · Place ${row.place_id}`);
+  for(const run of [...relevant].reverse()){
+    const member=members.find(row=>row.id===run.session_id);
+    lines.push('',`[${member.account_alias}] ${(run.status||'').toUpperCase()}`,run.response||run.error||'Aguardando saída…');
   }
-  if (!rows.length && emptyText) { const empty=document.createElement('p'); empty.className='sessions-empty'; empty.textContent=emptyText; container.append(empty); }
+  output.textContent=lines.join('\n')||'Selecione um lote conectado para acompanhar suas contas.';
+  output.scrollTop=follow?output.scrollHeight:scroll;
 }
 
 function applySnapshot(status, prompts) {
@@ -256,9 +287,9 @@ function applySnapshot(status, prompts) {
     const labels={starting:'Preparando conexão automática…',connecting:'Conectando jogos e workers automaticamente…',ready:'Conexão automática pronta',error:'Falha na conexão automática',stopped:'Conexão automática desativada'};
     document.querySelectorAll('.automation-status').forEach(element=>{element.textContent=status.automation.error || labels[status.automation.state] || '';});
   }
-  $('sessionCount').textContent=String(live.length);
-  $('navSessionCount').textContent=String(live.length);
-  $('historyCount').textContent=String(history.length);
+  $('sessionCount').textContent=String(grouped(live).length);
+  $('navSessionCount').textContent=String(grouped(live).length);
+  $('historyCount').textContent=String(grouped(history).length);
   if (selected && !live.some(row => row.id === selected)) selected=null;
   renderSessionList($('sessions'),live,feedConnected ? 'Nenhum jogo conectado neste momento.' : 'Aguardando confirmação das conexões…');
   renderSessionList($('pendingSessions'),pending);
@@ -268,7 +299,9 @@ function applySnapshot(status, prompts) {
   $('prompt').disabled=!agentConfigured || !live.length;
   $('sendPrompt').disabled=!agentConfigured || !live.length;
   // Keep mounted terminals and drafts during transport outages, but disable actions.
-  renderTerminalBoard(status.mcp_online ? status.sessions.filter(row=>liveStatuses.has(row.status)) : [],prompts.runs);
+  const terminalSessions=status.mcp_online ? status.sessions.filter(row=>liveStatuses.has(row.status)) : [];
+  renderWorkspaceTabs(terminalSessions);renderTerminalBoard(terminalSessions,prompts.runs);
+  renderBatchTerminal(status.sessions,prompts.runs);
 }
 
 async function refresh() {
@@ -322,7 +355,7 @@ $('groupLaunchForm').onsubmit = async event => {
     if (!aliases.length) throw new Error('Selecione pelo menos uma conta.');
     const data=await api('/launch-group',{method:'POST',body:JSON.stringify({link:$('groupGame').value.trim(),aliases})});
     $('groupGame').value='';
-    selected=data.sessions[0]?.session?.id || selected;
+    selected=data.sessions[0]?.session?.id || selected; selectedGroup=data.sessions[0]?.session?.group_id || selected;
     $('groupLaunchMessage').textContent=`${data.sessions.length} conta(s) enviada(s) ao mesmo jogo, cada uma com worker próprio.`;
     await refresh(); showView('sessions');
   } catch(error) { $('groupLaunchMessage').textContent=error.message; } finally { $('groupLaunchButton').disabled=false; }
@@ -333,12 +366,21 @@ $('gamesLaunchForm').onsubmit = async event => {
     const links=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);
     if (links.length>10) throw new Error('Informe no máximo 10 jogos.');
     const data=await api(links.length>1?'/launch-batch':'/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links})});
-    $('game').value=''; updateGameLinkCount(); selected=data.sessions[0]?.session?.id || selected;
+    $('game').value=''; updateGameLinkCount(); selected=data.sessions[0]?.session?.id || selected; selectedGroup=data.sessions[0]?.session?.group_id || selected;
     $('gamesLaunchMessage').textContent=`${data.sessions.length} jogo(s) distribuído(s), um por conta.`;
     await refresh(); showView('sessions');
   } catch(error) { $('gamesLaunchMessage').textContent=error.message; } finally { $('gamesLaunchButton').disabled=false; }
 };
-$('promptForm').onsubmit = async event => { event.preventDefault(); $('promptError').textContent=''; $('sendPrompt').disabled=true; try { await api('/prompts',{method:'POST',body:JSON.stringify({prompt:$('prompt').value.trim(),scope:'all'})}); $('prompt').value=''; await refresh(); } catch(error) { $('promptError').textContent=error.message; } finally { $('sendPrompt').disabled=false; } };
+$('promptForm').onsubmit = async event => { event.preventDefault(); $('promptError').textContent=''; $('sendPrompt').disabled=true; try { if(!selectedGroup)throw new Error('Selecione uma sessão.');await api('/prompts',{method:'POST',body:JSON.stringify({prompt:$('prompt').value.trim(),scope:'group',group_id:selectedGroup})}); $('prompt').value=''; await refresh(); } catch(error) { $('promptError').textContent=error.message; } finally { $('sendPrompt').disabled=false; } };
+document.querySelectorAll('[data-account-method]').forEach(button=>button.onclick=()=>{
+  const individual=button.dataset.accountMethod==='individual';
+  $('individualAccounts').hidden=!individual;$('txtAccounts').hidden=individual;
+  document.querySelectorAll('[data-account-method]').forEach(tab=>{const active=tab===button;tab.classList.toggle('active',active);tab.setAttribute('aria-pressed',String(active));});
+});
+$('accountsTxt').onchange=()=>{
+  const file=$('accountsTxt').files?.[0];
+  $('txtFileStatus').textContent=file?`${file.name} · ${Math.ceil(file.size/1024)} KB · aguardando definição do formato`:'Nenhum arquivo selecionado.';
+};
 document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>{showView(button.dataset.view);if(button.dataset.view==='accounts') void refreshRam();});
 $('selectAllAccounts').onclick=()=>{ $('accountChoices').querySelectorAll('input').forEach((input,index)=>{input.checked=index<10;}); updateSelectedAccounts(); };
 function updateGameLinkCount(){const count=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean).length;$('gameLinkCount').textContent=`${count} de 10 jogos`;$('gameLinkCount').classList.toggle('over-limit',count>10);}
