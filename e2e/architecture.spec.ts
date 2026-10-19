@@ -7,6 +7,9 @@ test('architecture diagram explains Project Real and MCP interactively on deskto
     '/architecture.html': ['public/architecture.html', 'text/html; charset=utf-8'],
     '/architecture.css': ['public/architecture.css', 'text/css; charset=utf-8'],
     '/architecture.js': ['public/architecture.js', 'text/javascript; charset=utf-8'],
+    '/mcp-connections.html': ['public/mcp-connections.html', 'text/html; charset=utf-8'],
+    '/mcp-connections.css': ['public/mcp-connections.css', 'text/css; charset=utf-8'],
+    '/mcp-connections.js': ['public/mcp-connections.js', 'text/javascript; charset=utf-8'],
   };
   const server = createServer((request, response) => {
     const file = files[request.url ?? ''];
@@ -34,6 +37,38 @@ test('architecture diagram explains Project Real and MCP interactively on deskto
     await page.locator('[data-step="proxy"]').click();
     await expect(page.locator('#detailTitle')).toHaveText('Proxy MCP por worker');
     await page.screenshot({ path: info.outputPath('architecture-mobile.png'), fullPage: true });
+  } finally {
+    await page.close(); server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+test('dedicated MCP guide shows one server and isolated routes', async ({ page }, info) => {
+  const files: Record<string, [string, string]> = {
+    '/mcp-connections.html': ['public/mcp-connections.html', 'text/html; charset=utf-8'],
+    '/mcp-connections.css': ['public/mcp-connections.css', 'text/css; charset=utf-8'],
+    '/mcp-connections.js': ['public/mcp-connections.js', 'text/javascript; charset=utf-8'],
+  };
+  const server = createServer((request, response) => {
+    const file = files[request.url ?? ''];
+    if (!file) { response.writeHead(404); response.end(); return; }
+    response.setHeader('content-type', file[1]); response.end(readFileSync(file[0]));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); if (!address || typeof address === 'string') throw new Error('No server address');
+  try {
+    await page.goto(`http://127.0.0.1:${address.port}/mcp-connections.html`);
+    await expect(page.getByRole('heading', { name: 'Um servidor. Vários Roblox.' })).toBeVisible();
+    await expect(page.locator('.mcp-server')).toHaveCount(1);
+    await expect(page.locator('.session-button')).toHaveCount(3);
+    await page.locator('[data-session="c"]').click();
+    await expect(page.locator('#activeRoute')).toContainText('socket #3 → Roblox C');
+    await expect(page.locator('.registry .route-c')).toHaveClass(/active/);
+    await page.locator('#replay').click();
+    await expect(page.locator('[data-stage="1"]')).toHaveClass(/playing/);
+    await page.screenshot({ path: info.outputPath('mcp-connections-desktop.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   } finally {
     await page.close(); server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));

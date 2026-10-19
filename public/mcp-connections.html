@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Conexões MCP · Multi</title>
+  <link rel="stylesheet" href="/mcp-connections.css">
+</head>
+<body>
+  <header>
+    <a class="brand" href="/"><small>ROBLOX WORKSPACE</small><b>Multi <i>/</i></b></a>
+    <nav><a href="/architecture.html">Arquitetura completa</a><a href="/">Painel</a><span><i></i> página local</span></nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">MCP MULTISSESSÃO · EXPLICAÇÃO VISUAL</p>
+      <h1>Um servidor.<br><em>Vários Roblox.</em></h1>
+      <p>Cada Roblox possui seu próprio cliente Lua e sua própria conexão. Todos entram pela porta <code>28429</code>, e o servidor usa o <code>worker_id</code> para entregar cada comando ao jogo correto.</p>
+      <div class="answer"><b>Resposta direta</b><span>Cada sessão não inicia outro servidor MCP. Ela inicia um <strong>cliente MCP exclusivo</strong> conectado ao mesmo servidor central.</span></div>
+    </section>
+
+    <section class="panel topology" aria-labelledby="topology-title">
+      <div class="heading"><div><p class="eyebrow">TOPOLOGIA REAL</p><h2 id="topology-title">Clique em uma sessão e acompanhe sua rota</h2></div><p>As outras conexões continuam abertas, mas somente a selecionada recebe o comando.</p></div>
+
+      <div class="session-picker" role="group" aria-label="Selecionar sessão">
+        <button class="session-button active" data-session="a" aria-pressed="true"><span>A</span><b>conta1</b><small>PID 11840</small></button>
+        <button class="session-button" data-session="b" aria-pressed="false"><span>B</span><b>conta2</b><small>PID 22416</small></button>
+        <button class="session-button" data-session="c" aria-pressed="false"><span>C</span><b>alt5</b><small>PID 30172</small></button>
+      </div>
+
+      <div class="topology-map">
+        <div class="layer agents">
+          <p class="layer-name">TERMINAIS / AGENTES</p>
+          <div class="stack">
+            <article class="route-a active"><span class="icon">›_</span><div><b>Terminal A</b><small>thread e histórico A</small><code>fixa worker conta1-a7f2</code></div></article>
+            <article class="route-b"><span class="icon">›_</span><div><b>Terminal B</b><small>thread e histórico B</small><code>fixa worker conta2-c91e</code></div></article>
+            <article class="route-c"><span class="icon">›_</span><div><b>Terminal C</b><small>thread e histórico C</small><code>fixa worker alt5-42bd</code></div></article>
+          </div>
+        </div>
+
+        <div class="flow-bridge left-bridge" aria-hidden="true">
+          <span class="route-a active">worker A <i></i></span><span class="route-b">worker B <i></i></span><span class="route-c">worker C <i></i></span>
+        </div>
+
+        <div class="mcp-server">
+          <div class="server-head"><span class="server-icon">M</span><div><small>1 PROCESSO NODE.JS</small><b>roblox-mcp-difz</b><code>127.0.0.1:28429</code></div><i class="online"></i></div>
+          <div class="server-parts">
+            <div><small>ENTRADAS HTTP</small><span>/health</span><span>/mcp.lua</span><span>/api/sessions</span></div>
+            <div><small>CANAIS PERSISTENTES</small><span>WebSocket #1</span><span>WebSocket #2</span><span>WebSocket #3</span></div>
+          </div>
+          <div class="registry"><small>TABELA DE ROTEAMENTO EM MEMÓRIA</small><div class="registry-head"><span>worker_id</span><span>socket</span><span>PID</span></div><div class="route-a active"><code>conta1-a7f2</code><b>#1</b><span>11840</span></div><div class="route-b"><code>conta2-c91e</code><b>#2</b><span>22416</span></div><div class="route-c"><code>alt5-42bd</code><b>#3</b><span>30172</span></div></div>
+        </div>
+
+        <div class="flow-bridge right-bridge" aria-hidden="true">
+          <span class="route-a active"><i></i> socket #1</span><span class="route-b"><i></i> socket #2</span><span class="route-c"><i></i> socket #3</span>
+        </div>
+
+        <div class="layer roblox-clients">
+          <p class="layer-name">PROCESSOS ROBLOX</p>
+          <div class="stack">
+            <article class="route-a active"><span class="icon roblox">RB</span><div><b>Roblox A</b><small>cliente Lua MCP A</small><code>PID 11840 · conta1-a7f2</code></div></article>
+            <article class="route-b"><span class="icon roblox">RB</span><div><b>Roblox B</b><small>cliente Lua MCP B</small><code>PID 22416 · conta2-c91e</code></div></article>
+            <article class="route-c"><span class="icon roblox">RB</span><div><b>Roblox C</b><small>cliente Lua MCP C</small><code>PID 30172 · alt5-42bd</code></div></article>
+          </div>
+        </div>
+      </div>
+
+      <div class="route-readout"><span>ROTA ATIVA</span><b id="activeRoute">Terminal A → worker conta1-a7f2 → socket #1 → Roblox A</b><small id="activeReturn">A resposta volta pelo socket #1 e aparece somente no Terminal A.</small></div>
+    </section>
+
+    <section class="panel sequence" aria-labelledby="sequence-title">
+      <div class="heading"><div><p class="eyebrow">IDA E VOLTA</p><h2 id="sequence-title">O caminho de um comando</h2></div><button id="replay" type="button">▶ Reproduzir fluxo</button></div>
+      <div class="sequence-track">
+        <article data-stage="1"><span>01</span><b>Você envia o prompt</b><p>No terminal de uma sessão específica.</p></article><i></i>
+        <article data-stage="2"><span>02</span><b>Proxy fixa o worker</b><p>O modelo não escolhe outro destino.</p></article><i></i>
+        <article data-stage="3"><span>03</span><b>MCP consulta o mapa</b><p>Localiza socket e PID do worker.</p></article><i></i>
+        <article data-stage="4"><span>04</span><b>Lua executa no Roblox</b><p>Somente o processo selecionado recebe.</p></article><i></i>
+        <article data-stage="5"><span>05</span><b>Resultado retorna</b><p>Mesmo socket, mesmo worker, mesmo terminal.</p></article>
+      </div>
+    </section>
+
+    <section class="split">
+      <article class="panel compare shared"><p class="eyebrow">COMPARTILHADO</p><h2>Existe apenas um</h2><ul><li><span>01</span>Servidor <code>roblox-mcp-difz</code></li><li><span>02</span>Endereço <code>127.0.0.1</code></li><li><span>03</span>Porta TCP <code>28429</code></li><li><span>04</span>Registro central de sessões</li></ul></article>
+      <article class="panel compare exclusive"><p class="eyebrow">EXCLUSIVO POR SESSÃO</p><h2>Cada Roblox possui o seu</h2><ul><li><span>01</span>Processo e PID do Roblox</li><li><span>02</span>Cliente MCP escrito em Lua</li><li><span>03</span>Conexão WebSocket/stream</li><li><span>04</span><code>worker_id</code>, terminal e histórico</li></ul></article>
+    </section>
+
+    <section class="panel port-explanation">
+      <div class="heading"><div><p class="eyebrow">POR QUE A MESMA PORTA FUNCIONA?</p><h2>Porta não é conexão</h2></div></div>
+      <div class="socket-demo">
+        <div class="origins"><code>127.0.0.1:<b>50121</b> · Roblox A</code><code>127.0.0.1:<b>50122</b> · Roblox B</code><code>127.0.0.1:<b>50123</b> · Roblox C</code></div>
+        <div class="merge"><i></i><i></i><i></i></div>
+        <div class="destination"><small>DESTINO COMPARTILHADO</small><code>127.0.0.1:<b>28429</b></code></div>
+      </div>
+      <p class="technical-note">O sistema operacional identifica cada conexão pela combinação de origem e destino. Mesmo que o destino seja sempre <code>:28429</code>, as portas temporárias de origem e os sockets são diferentes.</p>
+    </section>
+
+    <section class="panel failure">
+      <div class="heading"><div><p class="eyebrow">ISOLAMENTO DE FALHAS</p><h2>Se o Roblox B cair</h2></div><p>O servidor remove apenas o socket e o registro da sessão B.</p></div>
+      <div class="failure-flow"><div class="ok">Roblox A <b>continua conectado</b></div><div class="down">Roblox B <b>socket #2 removido</b></div><div class="ok">Roblox C <b>continua conectado</b></div></div>
+      <p>O servidor MCP permanece na porta <code>28429</code>. Os terminais A e C continuam funcionando; somente a sessão B muda para <code>disconnected</code>.</p>
+    </section>
+  </main>
+
+  <footer><span>Multi / guia local de conexões MCP</span><a href="/architecture.html">Ver arquitetura completa →</a></footer>
+  <script type="module" src="/mcp-connections.js"></script>
+</body>
+</html>
