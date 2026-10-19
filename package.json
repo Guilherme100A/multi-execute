@@ -16,7 +16,7 @@
     "import:ram": "tsx --env-file-if-exists=.env src/import-ram.ts",
     "test": "tsx --test test/*.test.ts",
     "test:e2e:live": "playwright test e2e/live-project.spec.ts",
-    "test:e2e:ui": "playwright test e2e/ui-realtime.spec.ts",
+    "test:e2e:ui": "playwright test e2e/ui-realtime.spec.ts e2e/architecture.spec.ts",
     "test:cli:live": "tsx scripts/check-agent-clis.ts",
     "check": "npm run build && npm test"
   },

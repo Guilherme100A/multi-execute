@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Arquitetura · Multi</title>
+  <link rel="stylesheet" href="/architecture.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="brand-kicker">ROBLOX WORKSPACE</span><strong>Multi <i>/</i></strong></a>
+    <nav><a href="/">← Voltar ao painel</a><span class="local-pill"><b></b> documentação local</span></nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="kicker">MAPA INTERATIVO DA ARQUITETURA</p>
+        <h1>Do clique no painel ao<br><span>worker conectado.</span></h1>
+        <p class="hero-copy">Veja como Launcher, Project Real e roblox-mcp-difz cooperam para abrir, identificar, injetar e controlar cada cliente Roblox sem misturar sessões.</p>
+      </div>
+      <div class="hero-stat">
+        <span>FOCO</span><strong>Project Real<br>+ MCP</strong>
+        <small>Clique nos blocos do diagrama para explorar cada etapa.</small>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="overview-title">
+      <div class="section-heading"><div><p class="kicker">VISÃO GERAL</p><h2 id="overview-title">O caminho completo</h2></div><p>Da solicitação até o terminal de IA.</p></div>
+      <div class="overview-flow" aria-label="Fluxo geral do projeto">
+        <button class="mini-node" data-step="ui"><span>01</span><b>Painel</b><small>Conta + links</small></button><i></i>
+        <button class="mini-node" data-step="launcher"><span>02</span><b>Launcher</b><small>Valida e registra</small></button><i></i>
+        <button class="mini-node accent-real" data-step="real"><span>03</span><b>Project Real</b><small>Seleciona e injeta</small></button><i></i>
+        <button class="mini-node" data-step="loader"><span>04</span><b>Loader Lua</b><small>Identidade do worker</small></button><i></i>
+        <button class="mini-node accent-mcp" data-step="mcp"><span>05</span><b>Roblox MCP</b><small>Ferramentas + sessão</small></button><i></i>
+        <button class="mini-node" data-step="agent"><span>06</span><b>CLI de IA</b><small>Terminal isolado</small></button>
+      </div>
+    </section>
+
+    <section class="section focus-section" aria-labelledby="focus-title">
+      <div class="section-heading"><div><p class="kicker">AMPLIAÇÃO</p><h2 id="focus-title">Project Real ↔ MCP, por dentro</h2></div><p>As duas identidades críticas são <code>PID</code> e <code>worker_id</code>.</p></div>
+
+      <div class="map-layout">
+        <div class="system-map">
+          <div class="lane-label"><span>HOST WINDOWS</span><em>Node.js / processos locais</em></div>
+          <div class="lane host-lane">
+            <button class="map-node launcher-node" data-step="launcher"><span class="node-icon">L</span><span><b>Launcher</b><small>Express + SQLite</small></span></button>
+            <div class="arrow"><span>sessão + PID esperado</span><i></i></div>
+            <button class="map-node real-node" data-step="connector"><span class="node-icon">R</span><span><b>real-mcp.exe</b><small>Conector oficial do Real</small></span></button>
+            <div class="arrow"><span>MCP local</span><i></i></div>
+            <button class="map-node real-node" data-step="real"><span class="node-icon">PR</span><span><b>Project Real</b><small>Lista, seleciona e injeta</small></span></button>
+          </div>
+
+          <div class="vertical-transfer"><i></i><span>inject / eval / execute</span><i></i></div>
+
+          <div class="lane-label"><span>PROCESSO ROBLOX</span><em>uma instância por conta</em></div>
+          <div class="lane client-lane">
+            <button class="map-node client-node" data-step="client"><span class="node-icon">RB</span><span><b>Cliente Roblox</b><small>Conta + PlaceId + JobId</small></span></button>
+            <div class="arrow"><span>AutoExec único</span><i></i></div>
+            <button class="map-node loader-node" data-step="loader"><span class="node-icon">{ }</span><span><b>Bootstrap Lua</b><small>Define PID e worker_id</small></span></button>
+            <div class="arrow"><span>HttpGet /mcp.lua</span><i></i></div>
+            <button class="map-node mcp-node" data-step="mcp-client"><span class="node-icon">↗</span><span><b>Cliente MCP Lua</b><small>WebSocket ou stream</small></span></button>
+          </div>
+
+          <div class="vertical-transfer reverse"><i></i><span>registro + keepalive + resultados</span><i></i></div>
+
+          <div class="lane-label"><span>SERVIDOR MCP · 127.0.0.1:28429</span><em>dentro do Launcher</em></div>
+          <div class="lane server-lane">
+            <button class="map-node mcp-node wide" data-step="mcp"><span class="node-icon">M</span><span><b>roblox-mcp-difz</b><small>/mcp.lua · /ws · /stream · /api/sessions</small></span></button>
+            <div class="arrow"><span>worker exato</span><i></i></div>
+            <button class="map-node proxy-node" data-step="proxy"><span class="node-icon">⛉</span><span><b>Proxy isolado</b><small>Fixa workerId no servidor</small></span></button>
+            <div class="arrow"><span>tools/call</span><i></i></div>
+            <button class="map-node agent-node" data-step="agent"><span class="node-icon">›_</span><span><b>Codex / Claude</b><small>Uma thread por worker</small></span></button>
+          </div>
+        </div>
+
+        <aside class="inspector" aria-live="polite">
+          <div class="inspector-top"><p class="kicker">DETALHES DA ETAPA</p><span id="detailNumber">01</span></div>
+          <h3 id="detailTitle">Launcher</h3>
+          <p id="detailDescription">Cria a sessão durável, escolhe a conta e coordena a abertura, a injeção e o monitoramento.</p>
+          <dl><div><dt>ENTRADA</dt><dd id="detailInput">Conta, PlaceId e configuração autorizada</dd></div><div><dt>SAÍDA</dt><dd id="detailOutput">worker_id persistido e lançamento preparado</dd></div></dl>
+          <div class="guarantee"><span>GARANTIA</span><p id="detailGuarantee">O estado sobrevive a reinícios no SQLite.</p></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="identity-section section">
+      <div class="section-heading"><div><p class="kicker">POR QUE DUAS IDENTIDADES?</p><h2>PID localiza. Worker ID isola.</h2></div></div>
+      <div class="identity-grid">
+        <article><span class="identity-key">MCP_PROCESS_ID</span><h3>PID do processo</h3><p>O Project Real usa o PID para selecionar exatamente qual janela Roblox receberá a injeção. Isso evita depender do título repetido das janelas.</p><code>900001 → cliente Roblox A</code></article>
+        <div class="identity-link"><i></i><b>mesma sessão</b><i></i></div>
+        <article><span class="identity-key">MCP_WORKER_ID</span><h3>Identidade lógica</h3><p>O servidor MCP usa o worker para rotear cada ferramenta, resultado e terminal. O proxy impede que a IA altere esse valor.</p><code>conta1-… → terminal A</code></article>
+      </div>
+    </section>
+
+    <section class="section sequence-section">
+      <div class="section-heading"><div><p class="kicker">SEQUÊNCIA REAL</p><h2>O que acontece quando você clica em “Iniciar”</h2></div></div>
+      <ol class="timeline">
+        <li><span>01</span><div><b>Validação atômica do lote</b><p>Todos os links, PlaceIds, contas e permissões são conferidos antes da primeira janela abrir.</p></div></li>
+        <li><span>02</span><div><b>Tickets e processos Roblox</b><p>No modo direto, o cofre DPAPI fornece a sessão e o Launcher obtém tickets temporários para abrir os clientes.</p></div></li>
+        <li><span>03</span><div><b>Descoberta pelo Project Real</b><p>O real-mcp.exe lista os clientes. O coordenador associa PID, conta e jogo ao lançamento esperado.</p></div></li>
+        <li><span>04</span><div><b>Seleção e injeção</b><p>O Real recebe set-active-client, inject e execute para a instância exata.</p></div></li>
+        <li><span>05</span><div><b>Bootstrap com trava</b><p>O Lua grava PID e worker_id em getgenv(), protege o JobId contra repetição e baixa /mcp.lua.</p></div></li>
+        <li><span>06</span><div><b>Registro no servidor MCP</b><p>O cliente escolhe WebSocket ou stream e registra sua identidade em 127.0.0.1:28429.</p></div></li>
+        <li><span>07</span><div><b>Confirmação forte</b><p>O Launcher só marca connected quando encontra o worker esperado e valida conta, jogo e processo.</p></div></li>
+        <li><span>08</span><div><b>Terminal liberado</b><p>A interface recebe o estado pelo feed ao vivo e habilita o prompt daquela sessão.</p></div></li>
+      </ol>
+    </section>
+
+    <section class="section prompt-section">
+      <div class="section-heading"><div><p class="kicker">CAMINHO DE UM PROMPT</p><h2>Como uma ferramenta chega ao jogo certo</h2></div></div>
+      <div class="prompt-flow">
+        <div><span>1</span><b>Terminal A</b><small>Prompt do operador</small></div><i></i>
+        <div><span>2</span><b>CLI A</b><small>Thread persistente</small></div><i></i>
+        <div><span>3</span><b>Proxy A</b><small>Injeta worker A</small></div><i></i>
+        <div><span>4</span><b>MCP</b><small>Enfileira tarefa</small></div><i></i>
+        <div><span>5</span><b>Roblox A</b><small>Executa e responde</small></div>
+      </div>
+      <div class="isolation-note"><b>Isolamento verificável</b><p>Mesmo que o modelo tente informar outro <code>workerId</code>, o proxy remove o valor e aplica o worker pertencente ao terminal.</p></div>
+    </section>
+
+    <section class="section resilience-section">
+      <div class="section-heading"><div><p class="kicker">FALHAS CONTROLADAS</p><h2>O que impede a automação de virar caos</h2></div></div>
+      <div class="resilience-grid">
+        <article><span>01</span><b>Injeção única</b><p>Trava por JobId e claim persistido impedem reinjeção na mesma instância.</p></article>
+        <article><span>02</span><b>Correlação forte</b><p>PID, worker, conta e PlaceId precisam apontar para a mesma sessão.</p></article>
+        <article><span>03</span><b>Fila durável</b><p>SQLite WAL preserva sessões, tentativas, threads e histórico.</p></article>
+        <article><span>04</span><b>Reconexão</b><p>O mesmo worker pode retornar sem abrir outro cliente Roblox.</p></article>
+        <article><span>05</span><b>Timeout explícito</b><p>Trabalhos presos passam para failed em vez de ficar indefinidos.</p></article>
+        <article><span>06</span><b>Escopo autorizado</b><p>Somente PlaceIds presentes na allowlist podem ser iniciados.</p></article>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>Multi / arquitetura local</span><a href="/">Abrir o painel →</a></footer>
+  <script type="module" src="/architecture.js"></script>
+</body>
+</html>

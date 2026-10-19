@@ -106,6 +106,8 @@ O arquivo gerado contém `AUTOEXEC_TOKEN`, por isso é ignorado pelo Git. Ele es
 
 Abra `http://127.0.0.1:3000`. A interface pede `PIPELINE_TOKEN` e guarda o valor apenas em `sessionStorage` da aba.
 
+O mapa interativo da arquitetura fica em `http://127.0.0.1:3000/architecture.html`. Ele detalha visualmente a seleção do cliente pelo Project Real, a injeção do bootstrap, o registro no roblox-mcp-difz e o proxy MCP isolado de cada terminal.
+
 - **Abrir jogo:** escolha uma conta e informe URL ou PlaceId.
 - **Gerenciar contas:** consulte sessões importadas no cofre local ou salve uma nova conta sem editar JSON manualmente.
 - **Sessões:** acompanhe os estados e use retry quando permitido.
