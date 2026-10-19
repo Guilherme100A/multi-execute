@@ -23,11 +23,7 @@ export class RamClient {
     for (let attempt = 0; attempt < this.attempts; attempt++) {
       try {
         const result = await this.http.request(`/v2/LaunchAccount?${params}`, 'GET', undefined, 10_000);
-        if (result && typeof result === 'object') {
-          const row = result as Record<string, unknown>;
-          if (row.Success === false || row.success === false) throw new Error(`RAM rejected launch: ${String(row.Message ?? row.message ?? 'unknown error')}`);
-        }
-        if (typeof result === 'string' && /^(error|failed|false)\b/i.test(result.trim())) throw new Error('RAM rejected launch');
+        this.result(result, 'LaunchAccount');
         return;
       } catch (error) {
         if (attempt === this.attempts - 1) throw error;

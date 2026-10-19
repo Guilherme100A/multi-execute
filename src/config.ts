@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { parseAccounts, placeId } from './validation.js';
 
 export function loadConfig(env = process.env) {
@@ -39,21 +40,28 @@ export function loadConfig(env = process.env) {
   const ramPassword = env.RAM_PASSWORD ?? '';
   if (ramPassword && ramPassword.length < 6) throw new Error('RAM_PASSWORD must be empty or at least 6 characters');
   const accountsFile = resolve(env.ACCOUNTS_FILE ?? 'accounts.json');
+  const launchBackend = env.LAUNCH_BACKEND ?? 'direct';
+  if (!['direct', 'ram'].includes(launchBackend)) throw new Error('LAUNCH_BACKEND must be direct or ram');
   const agentCliCommand = env.AGENT_CLI_COMMAND ?? (process.platform === 'win32' ? 'codex.cmd' : 'codex');
   if (!/^[A-Za-z0-9_.-]{1,80}$/.test(agentCliCommand)) throw new Error('AGENT_CLI_COMMAND must be an executable name without a path');
   const agentModel = env.AGENT_MODEL ?? 'gpt-6.1-sol';
+  const claudeCliCommand = env.CLAUDE_CLI_COMMAND ?? (process.platform === 'win32' ? 'claude.exe' : 'claude');
+  if (!/^[A-Za-z0-9_.-]{1,80}$/.test(claudeCliCommand)) throw new Error('Invalid CLAUDE_CLI_COMMAND');
   if (!/^[A-Za-z0-9._-]{1,80}$/.test(agentModel)) throw new Error('Invalid AGENT_MODEL');
   return {
     host, port, token, callbackToken, autoexecToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
     ramPassword, mcpToken: env.MCP_TOKEN ?? '',
+    launchBackend, directAccountsFile: resolve(env.DIRECT_ACCOUNTS_FILE ?? 'data/roblox-accounts.dpapi'),
+    autoConnect: env.AUTO_CONNECT !== 'false',
+    realMcpExecutable: resolve(env.REAL_MCP_EXECUTABLE ?? resolve(env.LOCALAPPDATA ?? resolve(homedir(), 'AppData/Local'), 'Real/data/mcp/real-mcp.exe')),
     accountsFile, accounts: parseAccounts(JSON.parse(readFileSync(accountsFile, 'utf8')) as unknown),
     databaseFile: resolve(env.DB_PATH ?? env.DATABASE_FILE ?? 'data/sessions.sqlite'),
     logDirectory: resolve(env.LOG_DIRECTORY ?? 'logs'), findingsDirectory: resolve(env.FINDINGS_DIRECTORY ?? 'findings'),
-    healthIntervalMs: integer('HEALTH_CHECK_INTERVAL_MS', 30_000, 1_000, 3_600_000),
-    launchTimeoutMs: integer('LAUNCH_TIMEOUT_MS', 60_000, 10_000, 3_600_000),
+    healthIntervalMs: integer('HEALTH_CHECK_INTERVAL_MS', 3_000, 1_000, 3_600_000),
+    launchTimeoutMs: integer('LAUNCH_TIMEOUT_MS', 120_000, 10_000, 3_600_000),
     maxRetries: integer('MAX_RETRIES', 3, 1, 10),
     retryBaseDelayMs: integer('RETRY_BASE_DELAY_MS', 2_000, 1, 60_000),
     injectionMode: env.INJECTION_MODE === 'mcp-execute' ? 'mcp-execute' as const : 'project-real-autoexec' as const,
-    agentCliCommand, agentModel,
+    agentCliCommand, agentModel, claudeCliCommand,
   };
 }

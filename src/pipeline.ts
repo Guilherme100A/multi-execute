@@ -13,7 +13,7 @@ export class Pipeline {
   private tickPromise?: Promise<void>;
   private drainPromise?: Promise<void>;
   private drainRequested = false;
-  constructor(readonly store: Store, private ram: Pick<RamClient, 'launch'>,
+  constructor(readonly store: Store, private launcher: Pick<RamClient, 'launch'> & { launchBatch?(games: { username: string; placeId: string }[]): Promise<void> },
     private mcp: Pick<McpClient, 'health' | 'sessions' | 'processes' | 'execute' | 'callTool'>,
     private accounts: Account[], private authorized: Set<string>, private log: Logger, private now = Date.now,
     private healthIntervalMs = 30_000, private launchTimeoutMs = 60_000,
@@ -28,6 +28,16 @@ export class Pipeline {
     }
   }
 
+  registeredUsername(alias: string): string | undefined { return this.accounts.find(row => row.alias === alias)?.robloxUsername; }
+  launchBatch(links: unknown, firstAlias: unknown): { session: Session; reused: boolean }[] {
+    const first = aliasValue(firstAlias);
+    const index = this.accounts.findIndex(account => account.alias === first);
+    if (index < 0) throw new InputError('Unknown account alias');
+    if (!Array.isArray(links) || !links.length || links.length > this.accounts.length) throw new InputError('Informe no máximo um link por conta disponível');
+    const games = links.map(placeId);
+    for (const game of games) if (!this.authorized.has(game)) throw new InputError(`PlaceId ${game} is not in AUTHORIZED_PLACE_IDS`);
+    return links.flatMap((link, offset) => this.launch([link], this.accounts[(index + offset) % this.accounts.length]!.alias));
+  }
   launch(links: unknown, alias: unknown): { session: Session; reused: boolean }[] {
     const account = aliasValue(alias);
     if (!this.accounts.some(row => row.alias === account)) throw new InputError('Unknown account alias');
@@ -38,6 +48,19 @@ export class Pipeline {
     const result = games.map(game => this.store.create(game.link, game.place, account));
     this.log.info('launch_queued', { ids: result.map(row => row.session.id) });
     this.kick(); return result;
+  }
+  attach(link: unknown, alias: unknown): Session {
+    if (this.injectionMode !== 'project-real-autoexec') throw new InputError('Attaching requires Project Real autoexec mode');
+    const account = aliasValue(alias);
+    if (!this.accounts.some(row => row.alias === account)) throw new InputError('Unknown account alias');
+    const game = placeId(link);
+    if (!this.authorized.has(game)) throw new InputError(`PlaceId ${game} is not in AUTHORIZED_PLACE_IDS`);
+    if (this.store.all().some(row => row.account_alias === account && ['pending', 'launching', 'connected', 'analyzing'].includes(row.status)))
+      throw new ConflictError('This account already has an active session');
+    const row = this.store.create(String(link), game, account).session;
+    this.change(row, 'launching');
+    this.log.info('existing_game_waiting_for_bootstrap', { id: row.id, worker_id: row.worker_id });
+    return this.store.get(row.id)!;
   }
   retry(id: string): Session {
     const current = this.store.get(id);
@@ -57,7 +80,7 @@ export class Pipeline {
     if (this.stopping) return;
     if (this.drainPromise) { this.drainRequested = true; return; }
     this.drainRequested = false;
-    this.drainPromise = this.drain().catch(error => this.log.error('queue_error', { error: String(error) })).finally(() => {
+    this.drainPromise = Promise.resolve().then(() => this.drain()).catch(error => this.log.error('queue_error', { error: String(error) })).finally(() => {
       this.drainPromise = undefined;
       if (this.drainRequested) this.kick();
     });
@@ -88,13 +111,27 @@ export class Pipeline {
       let sessions: McpSession[], processes: { instanceId: string }[];
       try {
         await this.mcp.health();
-        [sessions, processes] = await Promise.all([this.mcp.sessions(), this.mcp.processes()]);
+        sessions = await this.mcp.sessions();
+        // Project Real identifies sessions by workerId; process discovery is optional.
+        if (this.injectionMode === 'project-real-autoexec') {
+          try { processes = await this.mcp.processes(); }
+          catch (error) { processes = []; this.log.error('process_observation_unavailable', { error: String(error) }); }
+        } else processes = await this.mcp.processes();
         this.online = true;
       } catch (error) {
         this.online = false; this.log.error('mcp_offline', { error: String(error) }); return;
       }
       const live = new Set(processes.map(process => process.instanceId));
+      // Recover the same game after a temporary socket loss. Never resurrect a
+      // historical worker after the operator has opened a newer session.
+      const latest = new Map(this.store.all().map(row => [row.account_alias, row.id]));
       for (const row of this.store.all()) {
+        if (row.status === 'disconnected' && this.injectionMode === 'project-real-autoexec' &&
+            latest.get(row.account_alias) === row.id && this.authorized.has(row.place_id) &&
+            this.accounts.some(account => account.alias === row.account_alias)) {
+          const matches = sessions.filter(session => session.workerId === row.worker_id && session.instanceId === row.instance_id);
+          if (matches.length === 1) this.change(row, 'connected', null, matches[0]!.instanceId);
+        }
         if (row.status === 'launching') {
           const candidates = sessions.filter(session => this.injectionMode === 'project-real-autoexec'
             ? session.workerId === row.worker_id
@@ -151,8 +188,9 @@ export class Pipeline {
     try {
       while (this.online && !this.stopping) {
         const all = this.store.all();
-        // A RAM account may only be used by one running game at a time.
-        const row = all.find(candidate => candidate.status === 'pending' && !all.some(other => other.account_alias === candidate.account_alias && ['launching', 'connected', 'analyzing'].includes(other.status)));
+        // An account may only be used by one running game at a time.
+        const ready = all.filter(candidate => candidate.status === 'pending' && !all.some(other => other.account_alias === candidate.account_alias && ['launching', 'connected', 'analyzing'].includes(other.status)));
+        const row = ready[0];
         if (!row) break;
         if (!this.authorized.has(row.place_id) || !this.accounts.some(account => account.alias === row.account_alias)) {
           this.change(row, 'failed', 'Session is no longer authorized/configured'); continue;
@@ -160,14 +198,26 @@ export class Pipeline {
         let existing: McpSession[];
         try { await this.mcp.health(); existing = await this.mcp.sessions(); }
         catch (error) { this.online = false; this.log.error('queue_paused', { error: String(error) }); break; }
-        this.store.baseline(row.id, existing.map(session => session.instanceId));
-        this.change(row, 'launching');
+        const seen = new Set<string>();
+        const batch = this.launcher.launchBatch ? ready.filter(candidate => {
+          if (seen.has(candidate.account_alias) || !this.authorized.has(candidate.place_id) || !this.accounts.some(account => account.alias === candidate.account_alias)) return false;
+          seen.add(candidate.account_alias); return true;
+        }).slice(0, 10) : [row];
+        for (const candidate of batch) {
+          this.store.baseline(candidate.id, existing.map(session => session.instanceId));
+          this.change(candidate, 'launching');
+        }
         try {
-          await this.ram.launch(this.accounts.find(account => account.alias === row.account_alias)!.ramAccount, row.place_id);
-          this.log.info('ram_launch_requested', { id: row.id });
+          if (batch.length > 1 && this.launcher.launchBatch) await this.launcher.launchBatch(batch.map(candidate => ({
+            username: this.accounts.find(account => account.alias === candidate.account_alias)!.ramAccount, placeId: candidate.place_id,
+          })));
+          else await this.launcher.launch(this.accounts.find(account => account.alias === row.account_alias)!.ramAccount, row.place_id);
+          for (const candidate of batch) this.log.info('roblox_launch_requested', { id: candidate.id });
         } catch (error) {
-          const current = this.store.get(row.id)!;
-          if (current.status === 'launching') this.change(current, 'failed', String(error));
+          for (const candidate of batch) {
+            const current = this.store.get(candidate.id)!;
+            if (current.status === 'launching') this.change(current, 'failed', String(error));
+          }
         }
       }
     } finally { this.launching = false; }

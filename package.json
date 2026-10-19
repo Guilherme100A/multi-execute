@@ -8,17 +8,25 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "postinstall": "node scripts/apply-mcp-patch.mjs",
     "start": "node --env-file-if-exists=.env dist/src/index.js",
     "dev": "tsx --env-file-if-exists=.env src/index.ts",
     "batch": "tsx --env-file-if-exists=.env src/batch.ts",
     "setup:real": "tsx --env-file-if-exists=.env src/setup-real.ts",
+    "import:ram": "tsx --env-file-if-exists=.env src/import-ram.ts",
     "test": "tsx --test test/*.test.ts",
+    "test:e2e:live": "playwright test e2e/live-project.spec.ts",
+    "test:e2e:ui": "playwright test e2e/ui-realtime.spec.ts",
+    "test:cli:live": "tsx scripts/check-agent-clis.ts",
     "check": "npm run build && npm test"
   },
   "dependencies": {
-    "express": "^5.1.0"
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "express": "^5.1.0",
+    "roblox-mcp-difz": "^1.6.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.0",
     "tsx": "^4.20.0",

@@ -25,11 +25,12 @@ const token = 'test-secret-abcdefghijklmnopqrstuvwxyz';
 const callbackToken = 'callback-secret-abcdefghijklmnopqrstuvwxyz';
 const autoexecToken = 'autoexec-secret-abcdefghijklmnopqrstuvwxyz';
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
-function fixture(now = Date.now, store = new Store(':memory:', now), injectionMode: 'project-real-autoexec' | 'mcp-execute' = 'mcp-execute') {
+function fixture(now = Date.now, store = new Store(':memory:', now), injectionMode: 'project-real-autoexec' | 'mcp-execute' = 'mcp-execute', batched = false) {
   let available = true;
   let sessions: McpSession[] = [];
   let processes: { instanceId: string }[] = [];
   const launches: string[][] = [], executions: string[][] = [], toolCalls: { name: string; args: Record<string, unknown> }[] = [];
+  const batches: { username: string; placeId: string }[][] = [];
   const mcp = {
     async health() { if (!available) throw new Error('offline'); },
     async sessions() { return sessions; },
@@ -37,8 +38,10 @@ function fixture(now = Date.now, store = new Store(':memory:', now), injectionMo
     async execute(id: string, script: string) { executions.push([id, script]); },
     async callTool(name: string, args: Record<string, unknown>) { toolCalls.push({ name, args }); return { success: true }; },
   };
-  const pipeline = new Pipeline(store, { async launch(account, place) { launches.push([account, place]); } }, mcp, accounts, new Set(['123456', '654321']), log, now, 30_000, 60_000, injectionMode);
-  return { store, pipeline, launches, executions, toolCalls, mcp,
+  const pipeline = new Pipeline(store, { async launch(account, place) { launches.push([account, place]); },
+    ...(batched ? { async launchBatch(games: { username: string; placeId: string }[]) { batches.push(games); } } : {}),
+  }, mcp, accounts, new Set(['123456', '654321']), log, now, 30_000, 60_000, injectionMode);
+  return { store, pipeline, launches, batches, executions, toolCalls, mcp,
     offline(value: boolean) { available = !value; },
     live(rows: McpSession[]) { sessions = rows; processes = rows.map(row => ({ instanceId: row.instanceId })); },
     processes(rows: { instanceId: string }[]) { processes = rows; },
@@ -207,6 +210,24 @@ test('Project Real mode connects only after Auto-Execute registers the exact wor
   } finally { await f.pipeline.stop(); f.store.close(); }
 });
 
+test('same Roblox worker reconnects without reopening the game, but historical workers stay closed', async () => {
+  const f=fixture(Date.now,new Store(':memory:'),'project-real-autoexec');
+  try {
+    const row=f.pipeline.launch(['123456'],'alpha')[0]!.session;
+    await f.pipeline.tick(); await flush();
+    const connected={...remote(),workerId:row.worker_id};
+    f.live([connected]); await f.pipeline.tick();
+    f.live([]); await f.pipeline.tick(); assert.equal(f.store.get(row.id)!.status,'disconnected');
+    f.live([connected]); await f.pipeline.tick();
+    assert.equal(f.store.get(row.id)!.status,'connected'); assert.equal(f.store.get(row.id)!.finished_at,null);
+    assert.equal(f.launches.length,1); assert.equal(f.toolCalls.length,1);
+    f.live([]); await f.pipeline.tick();
+    f.pipeline.launch(['654321'],'alpha'); await flush();
+    f.live([connected]); await f.pipeline.tick();
+    assert.equal(f.store.get(row.id)!.status,'disconnected');
+  } finally {await f.pipeline.stop(); f.store.close();}
+});
+
 test('existing and ambiguous instances never receive a loader', async () => {
   const f = fixture();
   try {
@@ -253,7 +274,7 @@ test('RAM uses encoded query, 10s deadline, 3 total attempts and bounded backoff
   const fake: typeof fetch = async (input, options) => {
     urls.push(String(input)); deadlines.push(options!.signal!);
     assert.equal(options!.method, 'GET');
-    calls++; return new Response(calls < 3 ? 'error' : 'OK', { status: calls < 3 ? 503 : 200 });
+    calls++; return calls < 3 ? new Response('error', { status: 503 }) : Response.json({ Success: true, Message: 'Launched' });
   };
   const ram = new RamClient(new HttpClient('http://127.0.0.1:7963', '', fake), 'ram password', async (ms: number) => { waits.push(ms); });
   await ram.launch('Account & ? name', '123456');
@@ -268,6 +289,72 @@ test('RAM uses encoded query, 10s deadline, 3 total attempts and bounded backoff
   let failedCalls = 0;
   const fail = new RamClient(new HttpClient('http://localhost', '', async () => { failedCalls++; throw new Error('timeout'); }), '', async () => {});
   await assert.rejects(() => fail.launch('test', '123456'), /timeout/); assert.equal(failedCalls, 3);
+});
+
+test('RAM rejects HTTP success without a confirmed LaunchAccount result', async () => {
+  for (const body of ['', 'OK', '<html>Login required</html>', '{}', '{"Success":false,"Message":"Disabled"}', '{"Success":true}']) {
+    const ram = new RamClient(new HttpClient('http://127.0.0.1:7963', '', async () => new Response(body)), '', async () => {}, 1);
+    await assert.rejects(() => ram.launch('AlphaUser', '123456'), /RAM LaunchAccount/);
+  }
+});
+
+test('Project Real connects when process observation is unavailable', async () => {
+  const f = fixture(Date.now, new Store(':memory:'), 'project-real-autoexec');
+  try {
+    f.pipeline.launch(['123456'], 'alpha');
+    await f.pipeline.tick(); await flush();
+    const row = f.store.all()[0]!;
+    assert.equal(row.status, 'launching');
+    f.live([{ id: row.worker_id, workerId: row.worker_id, instanceId: 'worker:' + row.worker_id }]);
+    f.mcp.processes = async () => { throw new Error('Process observation unavailable'); };
+    await f.pipeline.tick();
+    assert.equal(f.pipeline.online, true);
+    assert.equal(f.store.get(row.id)!.status, 'connected');
+    assert.equal(f.toolCalls.length, 1);
+  } finally { await f.pipeline.stop(); f.store.close(); }
+});
+
+test('attach validates an existing game and binds its bootstrap without launching another client', async () => {
+  const f = fixture(Date.now, new Store(':memory:'), 'project-real-autoexec');
+  try {
+    assert.throws(() => f.pipeline.attach('999999', 'alpha'), /AUTHORIZED_PLACE_IDS/);
+    assert.throws(() => f.pipeline.attach('123456', 'missing'), /Unknown account/);
+    assert.equal(f.store.all().length, 0);
+    const row = f.pipeline.attach('123456', 'alpha');
+    assert.equal(row.status, 'launching');
+    assert.throws(() => f.pipeline.attach('654321', 'alpha'), /active session/);
+    assert.equal(f.pipeline.registerAutoexec('AlphaUser', '123456').worker_id, row.worker_id);
+    assert.throws(() => f.pipeline.registerAutoexec('AlphaUser', '654321'));
+    f.live([{ id: row.worker_id, workerId: row.worker_id, instanceId: 'worker:' + row.worker_id }]);
+    await f.pipeline.tick(); await flush();
+    assert.equal(f.store.get(row.id)!.status, 'connected');
+    assert.equal(f.launches.length, 0);
+    assert.equal(f.executions.length, 0);
+    assert.equal(f.toolCalls.length, 1);
+  } finally { await f.pipeline.stop(); f.store.close(); }
+});
+
+test('browser batch validates every game before distributing links across accounts', async () => {
+  const f = fixture();
+  try {
+    assert.throws(() => f.pipeline.launchBatch(['123456', '999999'], 'alpha'), /AUTHORIZED_PLACE_IDS/);
+    assert.equal(f.store.all().length, 0);
+    const result = f.pipeline.launchBatch(['123456', '654321'], 'beta');
+    assert.deepEqual(result.map(row => [row.session.account_alias, row.session.place_id]), [['beta', '123456'], ['alpha', '654321']]);
+    assert.equal(f.launches.length, 0);
+  } finally { await f.pipeline.stop(); f.store.close(); }
+});
+
+test('a browser batch reaches the native launcher together rather than as staggered logins', async () => {
+  const f = fixture(Date.now, new Store(':memory:'), 'project-real-autoexec', true);
+  try {
+    await f.pipeline.tick(); await flush();
+    f.pipeline.launchBatch(['123456', '654321'], 'alpha');
+    await flush();
+    assert.deepEqual(f.batches, [[{ username: 'RAM Alpha', placeId: '123456' }, { username: 'RAM Beta', placeId: '654321' }]]);
+    assert.equal(f.launches.length, 0);
+    assert.deepEqual(f.store.all().map(row => row.status), ['launching', 'launching']);
+  } finally { await f.pipeline.stop(); f.store.close(); }
 });
 
 test('RAM lists accounts and imports a cookie once without exposing it in errors', async () => {
@@ -314,7 +401,7 @@ test('HTTP endpoints authenticate, reject stale callbacks, save findings and enf
   const autoexec = (body: unknown, bearer = autoexecToken) => fetch(base + '/internal/autoexec/register', { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   try {
     const ui = await fetch(base + '/');
-    assert.equal(ui.status, 200); assert.match(await ui.text(), /Security Pipeline/);
+    assert.equal(ui.status, 200); assert.match(await ui.text(), /Multi · Workspace/);
     assert.equal((await fetch(base + '/status')).status, 401);
     assert.equal((await call('/launch', { links: ['123456'], alias: 'alpha' })).status, 202);
     assert.equal((await call('/launch', { links: ['123456'], alias: 'alpha' })).status, 200);
@@ -359,6 +446,7 @@ test('HTTP endpoints authenticate, reject stale callbacks, save findings and enf
 
 test('prompt console persists one isolated run per connected worker', async () => {
   const f = fixture(Date.now, new Store(':memory:'), 'project-real-autoexec');
+  f.pipeline.online = true;
   const seen: string[] = [];
   const fakeAgent = {
     configured: true, model: 'test-model',
@@ -386,6 +474,29 @@ test('prompt console persists one isolated run per connected worker', async () =
     await new Promise<void>(resolve => server.close(() => resolve()));
     await f.pipeline.stop(); f.store.close();
   }
+});
+
+test('disconnect stops the active analysis and offline sessions cannot receive prompts', async () => {
+  const f=fixture(Date.now,new Store(':memory:'),'project-real-autoexec');
+  f.pipeline.online=true;
+  const row=f.store.create('123456','123456','alpha').session;
+  f.store.transition(row.id,'launching'); f.store.transition(row.id,'connected',null,'instance');
+  let aborted=false;
+  const fakeAgent={configured:true,model:'test',run(_worker: string,_prompt: string,_policy: string,_progress: unknown,_thread: unknown,_started: unknown,signal: AbortSignal) {
+    return new Promise<string>((_resolve,reject)=>signal.addEventListener('abort',()=>{aborted=true;reject(new Error('Jogo desconectado'));},{once:true}));
+  }} as unknown as AgentRunner;
+  const server=createApp(f.pipeline,token,callbackToken,autoexecToken,'findings',log,fakeAgent,accounts).listen(0,'127.0.0.1');
+  await new Promise<void>(resolve=>server.once('listening',resolve));
+  const addr=server.address(); assert.ok(addr && typeof addr==='object');
+  const send=()=>fetch(`http://127.0.0.1:${addr.port}/prompts`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({prompt:'observe',scope:'all'})});
+  try {
+    assert.equal((await send()).status,202);
+    f.store.transition(row.id,'disconnected','gone');
+    await new Promise(resolve=>setTimeout(resolve,650));
+    assert.equal(aborted,true); assert.equal(f.store.prompts()[0]!.status,'failed');
+    assert.match(f.store.prompts()[0]!.error!,/desconectado/);
+    f.pipeline.online=false; assert.equal((await send()).status,409);
+  } finally { await new Promise<void>(resolve=>server.close(()=>resolve())); await f.pipeline.stop(); f.store.close(); }
 });
 
 test('CLI MCP proxy hides worker selection and enforces the assigned worker', async () => {

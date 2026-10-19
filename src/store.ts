@@ -12,6 +12,7 @@ export interface Session {
 }
 export type PromptStatus = 'queued' | 'running' | 'done' | 'failed';
 export interface PromptRun {
+  provider: string; model: string;
   id: string; session_id: string; worker_id: string; prompt: string; status: PromptStatus;
   response: string | null; error: string | null; created_at: number; updated_at: number;
 }
@@ -19,7 +20,7 @@ export interface AgentPolicy { filename: string; content: string; updated_at: nu
 const transitions: Record<Status, Status[]> = {
   pending: ['launching', 'failed'], launching: ['connected', 'failed'],
   connected: ['analyzing', 'failed', 'disconnected'], analyzing: ['done', 'failed', 'disconnected'],
-  done: [], failed: [], disconnected: [],
+  done: [], failed: [], disconnected: ['connected'],
 };
 export class ConflictError extends Error {}
 
@@ -56,6 +57,10 @@ export class Store {
     this.db.exec(`CREATE TABLE IF NOT EXISTS agent_policy (
       id INTEGER PRIMARY KEY CHECK(id=1), filename TEXT NOT NULL, content TEXT NOT NULL, updated_at INTEGER NOT NULL
     );`);
+    const promptColumns=this.db.prepare('PRAGMA table_info(prompt_runs)').all() as {name:string}[];
+    if (!promptColumns.some(row=>row.name==='provider')) this.db.exec("ALTER TABLE prompt_runs ADD COLUMN provider TEXT NOT NULL DEFAULT 'codex'");
+    if (!promptColumns.some(row=>row.name==='model')) this.db.exec("ALTER TABLE prompt_runs ADD COLUMN model TEXT NOT NULL DEFAULT ''");
+    this.db.exec('CREATE TABLE IF NOT EXISTS agent_settings (id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL, model TEXT NOT NULL)');
   }
   get(id: string): Session | undefined { return this.db.prepare('SELECT * FROM sessions WHERE id=?').get(id) as Session | undefined; }
   all(): Session[] { return this.db.prepare('SELECT * FROM sessions ORDER BY created_at,rowid').all() as unknown as Session[]; }
@@ -79,7 +84,7 @@ export class Store {
     const result = this.db.prepare(`UPDATE sessions SET status=?,last_error=?,updated_at=?,
       launching_at=CASE WHEN ?='launching' THEN ? ELSE launching_at END,
       connected_at=CASE WHEN ?='connected' THEN ? ELSE connected_at END,
-      finished_at=CASE WHEN ? IN ('done','failed','disconnected') THEN ? ELSE finished_at END,
+      finished_at=CASE WHEN ? IN ('done','failed','disconnected') THEN ? ELSE NULL END,
       instance_id=COALESCE(?,instance_id) WHERE id=? AND status=?`)
       .run(next, error, timestamp, next, timestamp, next, timestamp, next, timestamp, instance ?? null, id, current.status);
     if (!result.changes) throw new ConflictError('Session changed concurrently');
@@ -110,10 +115,10 @@ export class Store {
   claim(session: Session, instance: string): boolean {
     return !!this.db.prepare('INSERT OR IGNORE INTO injections VALUES(?,?,?,?)').run(instance, session.id, session.worker_id, this.now()).changes;
   }
-  createPrompt(session: Session, prompt: string): PromptRun {
+  createPrompt(session: Session, prompt: string, selection = {provider:'codex',model:''}): PromptRun {
     const id = randomUUID(), timestamp = this.now();
-    this.db.prepare("INSERT INTO prompt_runs(id,session_id,worker_id,prompt,status,created_at,updated_at) VALUES(?,?,?,?, 'queued',?,?)")
-      .run(id, session.id, session.worker_id, prompt, timestamp, timestamp);
+    this.db.prepare("INSERT INTO prompt_runs(id,session_id,worker_id,prompt,status,created_at,updated_at,provider,model) VALUES(?,?,?,?, 'queued',?,?,?,?)")
+      .run(id, session.id, session.worker_id, prompt, timestamp, timestamp,selection.provider,selection.model);
     return this.db.prepare('SELECT * FROM prompt_runs WHERE id=?').get(id) as unknown as PromptRun;
   }
   prompts(limit = 100): PromptRun[] {
@@ -124,6 +129,8 @@ export class Store {
     if (!result.changes) throw new ConflictError('Unknown prompt run');
     return this.db.prepare('SELECT * FROM prompt_runs WHERE id=?').get(id) as unknown as PromptRun;
   }
+  agentSettings(): {provider:'codex'|'claude';model:string} | undefined { return this.db.prepare('SELECT provider,model FROM agent_settings WHERE id=1').get() as {provider:'codex'|'claude';model:string} | undefined; }
+  setAgentSettings(selection: {provider:string;model:string}): void { this.db.prepare('INSERT INTO agent_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,model=excluded.model').run(selection.provider,selection.model); }
   agentThread(workerId: string): string | undefined {
     const row = this.db.prepare('SELECT thread_id FROM agent_threads WHERE worker_id=?').get(workerId) as { thread_id: string } | undefined;
     return row?.thread_id;
