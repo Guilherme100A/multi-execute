@@ -27,3 +27,26 @@ function selectStep(key, scroll = false) {
 
 nodes.forEach(node => node.addEventListener('click', () => selectStep(node.dataset.step, true)));
 selectStep('launcher');
+
+const routeData = {
+  a: ['Terminal A → conta1-a7f2', 'MCP envia pelo canal #1 → PID 11840'],
+  b: ['Terminal B → conta2-c91e', 'MCP envia pelo canal #2 → PID 22416'],
+  c: ['Terminal C → alt5-42bd', 'MCP envia pelo canal #3 → PID 30172'],
+};
+const routeButtons = document.querySelectorAll('.session-route');
+const routeWorker = document.querySelector('#routeWorker');
+const routePath = document.querySelector('#routePath');
+
+function selectRoute(route) {
+  routeButtons.forEach(button => {
+    const selected = button.dataset.route === route;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  document.querySelectorAll('.socket-line,.route-row').forEach(element => {
+    element.classList.toggle('active', element.classList.contains(`route-${route}`));
+  });
+  [routeWorker.textContent, routePath.textContent] = routeData[route];
+}
+
+routeButtons.forEach(button => button.addEventListener('click', () => selectRoute(button.dataset.route)));

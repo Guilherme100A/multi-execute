@@ -19,6 +19,12 @@ test('architecture diagram explains Project Real and MCP interactively on deskto
     await page.goto(`http://127.0.0.1:${address.port}/architecture.html`);
     await expect(page.getByRole('heading', { name: 'Project Real ↔ MCP, por dentro' })).toBeVisible();
     await expect(page.locator('.map-node')).toHaveCount(9);
+    await expect(page.getByRole('heading', { name: 'Como a porta 28429 não mistura os Roblox' })).toBeVisible();
+    await expect(page.locator('.session-route')).toHaveCount(3);
+    await page.locator('[data-route="b"]').click();
+    await expect(page.locator('#routeWorker')).toHaveText('Terminal B → conta2-c91e');
+    await expect(page.locator('#routePath')).toContainText('canal #2');
+    await expect(page.locator('.route-row.route-b')).toHaveClass(/active/);
     await page.locator('[data-step="real"]').last().click();
     await expect(page.locator('#detailTitle')).toHaveText('Project Real');
     await expect(page.locator('#detailGuarantee')).toContainText('PID');

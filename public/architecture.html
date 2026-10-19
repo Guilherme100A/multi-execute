@@ -93,6 +93,59 @@
       </div>
     </section>
 
+    <section class="section port-section" aria-labelledby="port-title">
+      <div class="section-heading"><div><p class="kicker">UMA PORTA, VÁRIAS SESSÕES</p><h2 id="port-title">Como a porta 28429 não mistura os Roblox</h2></div><p>A porta é apenas a entrada do servidor. Cada Roblox mantém sua própria conexão e se registra com um <code>worker_id</code> exclusivo.</p></div>
+
+      <div class="port-legend" aria-label="Legenda de protocolos">
+        <span><i class="protocol-http"></i>HTTP: arquivos, saúde e lista de sessões</span>
+        <span><i class="protocol-ws"></i>WebSocket/stream: canal persistente de cada Roblox</span>
+        <span><i class="protocol-tool"></i>MCP: comandos e respostas roteados</span>
+      </div>
+
+      <div class="multiplex-map" aria-label="Diagrama de multiplexação da porta 28429">
+        <div class="multi-column clients-column">
+          <div class="multi-label">PROCESSOS ROBLOX</div>
+          <button class="session-route active" data-route="a" aria-pressed="true"><span class="session-led"></span><span><b>Roblox A</b><small>PID 11840 · conta1</small><code>worker: conta1-a7f2</code></span></button>
+          <button class="session-route" data-route="b" aria-pressed="false"><span class="session-led"></span><span><b>Roblox B</b><small>PID 22416 · conta2</small><code>worker: conta2-c91e</code></span></button>
+          <button class="session-route" data-route="c" aria-pressed="false"><span class="session-led"></span><span><b>Roblox C</b><small>PID 30172 · alt5</small><code>worker: alt5-42bd</code></span></button>
+        </div>
+
+        <div class="socket-lines" aria-hidden="true">
+          <span class="socket-line route-a active"><b>conexão #1</b></span>
+          <span class="socket-line route-b"><b>conexão #2</b></span>
+          <span class="socket-line route-c"><b>conexão #3</b></span>
+        </div>
+
+        <div class="port-gateway">
+          <span class="gateway-pulse"></span>
+          <div class="port-number"><small>127.0.0.1</small><strong>:28429</strong><em>uma porta TCP</em></div>
+          <div class="endpoint-list"><span>GET /mcp.lua</span><span>GET /api/sessions</span><span>WS / stream</span></div>
+        </div>
+
+        <div class="routing-arrow" aria-hidden="true"><span>registro</span><i></i><span>roteamento</span></div>
+
+        <div class="multi-column registry-column">
+          <div class="multi-label">REGISTRO DO MCP</div>
+          <div class="routing-table">
+            <div class="table-head"><span>worker_id</span><span>canal</span><span>PID</span></div>
+            <div class="route-row route-a active"><code>conta1-a7f2</code><b>#1</b><span>11840</span></div>
+            <div class="route-row route-b"><code>conta2-c91e</code><b>#2</b><span>22416</span></div>
+            <div class="route-row route-c"><code>alt5-42bd</code><b>#3</b><span>30172</span></div>
+          </div>
+          <div class="selected-route"><small>ROTA SELECIONADA</small><b id="routeWorker">Terminal A → conta1-a7f2</b><span id="routePath">MCP envia pelo canal #1 → PID 11840</span></div>
+        </div>
+      </div>
+
+      <div class="connection-explainer">
+        <article><span>01</span><div><b>A porta aceita muitas conexões</b><p>O Windows diferencia cada conexão pelo endereço e pela porta de origem. Todos chegam em <code>:28429</code>, mas são sockets separados.</p></div></article>
+        <article><span>02</span><div><b>O registro cria o mapa</b><p>Ao conectar, o Lua anuncia <code>worker_id</code> e PID. O servidor guarda qual worker pertence a qual canal aberto.</p></div></article>
+        <article><span>03</span><div><b>O comando leva o endereço lógico</b><p>O terminal envia uma ferramenta para um worker. O MCP consulta o mapa e entrega somente no socket daquele Roblox.</p></div></article>
+        <article><span>04</span><div><b>A resposta volta pelo mesmo canal</b><p>O resultado retorna com a identidade da sessão e aparece apenas no terminal que originou o comando.</p></div></article>
+      </div>
+
+      <div class="port-callout"><b>Analogia simples</b><p>A porta <code>28429</code> é a portaria do prédio. O <code>worker_id</code> é o número do apartamento, e cada WebSocket é uma linha direta entre a portaria e um apartamento.</p></div>
+    </section>
+
     <section class="section sequence-section">
       <div class="section-heading"><div><p class="kicker">SEQUÊNCIA REAL</p><h2>O que acontece quando você clica em “Iniciar”</h2></div></div>
       <ol class="timeline">
