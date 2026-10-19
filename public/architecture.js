@@ -1,5 +1,5 @@
 const details = {
-  ui: ['01','Painel web','Recebe a conta e um ou mais links de jogos. Mostra estados e terminais sem controlar diretamente o Roblox.','Conta selecionada e links','Solicitação autenticada para o Launcher','O PIPELINE_TOKEN protege todas as operações do painel.'],
+  ui: ['01','Painel web','Recebe a conta e um ou mais links de jogos. Mostra estados e terminais sem controlar diretamente o Roblox.','Conta selecionada e links','Solicitação local para o Launcher','A interface só escuta no próprio computador, em 127.0.0.1.'],
   launcher: ['02','Launcher','Cria a sessão durável, escolhe a conta e coordena abertura, injeção e monitoramento.','Conta, PlaceId e configuração autorizada','worker_id persistido e lançamento preparado','O estado sobrevive a reinícios no SQLite.'],
   connector: ['03','Conector real-mcp.exe','Fala com o Project Real pelo protocolo MCP local e expõe as ferramentas oficiais de gerenciamento dos clientes.','PID esperado e comandos do coordenador','Lista de clientes e execução direcionada','A integração usa o executável instalado pelo próprio Project Real.'],
   real: ['04','Project Real','Encontra o processo Roblox, seleciona a instância pelo PID e executa o bootstrap somente nela.','PID, cliente esperado e script Lua','Bootstrap executado no processo correto','O PID evita confusão entre janelas Roblox com o mesmo título.'],

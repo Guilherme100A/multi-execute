@@ -11,15 +11,16 @@ import type { Account } from './validation.js';
 import type { AccountRegistry } from './account-registry.js';
 import type { RamClient } from './clients.js';
 
-export function createApp(pipeline: Pipeline, token: string, callbackToken: string, autoexecToken: string,
+export function createApp(pipeline: Pipeline, callbackToken: string, autoexecToken: string,
   findings: string, log: Logger, agent?: AgentRunner, accounts: Account[] = [], accountRegistry?: AccountRegistry,
   localAccounts?: Pick<RamClient, 'accounts' | 'importCookie'>, automation = () => ({ enabled: false, state: 'stopped', error: null as string | null })) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.static(resolve('public'), { index: 'index.html', fallthrough: true }));
   app.use((req, res, next) => {
+    if (!req.path.startsWith('/internal/')) { next(); return; }
     const supplied = Buffer.from(req.headers.authorization ?? '');
-    const routeToken = req.path.startsWith('/internal/autoexec/') ? autoexecToken : req.path.startsWith('/internal/') ? callbackToken : token;
+    const routeToken = req.path.startsWith('/internal/autoexec/') ? autoexecToken : callbackToken;
     const expected = Buffer.from(`Bearer ${routeToken}`);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { res.status(401).json({ error: 'Unauthorized' }); return; }
     next();

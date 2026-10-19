@@ -27,7 +27,7 @@ if (savedAgent) { try { agent.select(savedAgent); } catch { log.error('saved_age
 const origin = `http://${config.host === '::1' ? '[::1]' : config.host}:${config.port}`;
 const automatic = config.autoConnect ? new AutoConnector(pipeline, mcp, new RealConnectionClient(config.realMcpExecutable),
   new LocalMcpServer(), writeBootstrap(origin, config.autoexecToken), log) : undefined;
-const server = createApp(pipeline, config.token, config.callbackToken, config.autoexecToken, config.findingsDirectory, log, agent, config.accounts, accountRegistry, launcher,
+const server = createApp(pipeline, config.callbackToken, config.autoexecToken, config.findingsDirectory, log, agent, config.accounts, accountRegistry, launcher,
   () => automatic?.status ?? { enabled: false, state: 'stopped', error: null }).listen(config.port, config.host, () => {
   log.info('server_started', { host: config.host, port: config.port });
   console.log(`Authorized pipeline: http://${config.host}:${config.port}`);

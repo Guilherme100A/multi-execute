@@ -402,20 +402,20 @@ test('MCP validates real camelCase contracts and forwards tool execution', async
   await assert.rejects(() => broken.sessions(), /workerId/);
 });
 
-test('HTTP endpoints authenticate, reject stale callbacks, save findings and enforce lifecycle', async () => {
+test('local HTTP API is open while internal callbacks stay authenticated', async () => {
   const f = fixture();
   const dir = mkdtempSync(join(tmpdir(), 'pipeline-http-'));
-  const server = createApp(f.pipeline, token, callbackToken, autoexecToken, dir, log).listen(0, '127.0.0.1');
+  const server = createApp(f.pipeline, callbackToken, autoexecToken, dir, log).listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const addr = server.address(); assert.ok(addr && typeof addr === 'object');
   const base = `http://127.0.0.1:${addr.port}`;
-  const call = (path: string, body?: unknown) => fetch(base + path, { method: body === undefined ? 'GET' : 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const call = (path: string, body?: unknown) => fetch(base + path, { method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const callback = (path: string, body: unknown, bearer = callbackToken) => fetch(base + path, { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const autoexec = (body: unknown, bearer = autoexecToken) => fetch(base + '/internal/autoexec/register', { method: 'POST', headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   try {
     const ui = await fetch(base + '/');
     assert.equal(ui.status, 200); assert.match(await ui.text(), /Multi · Workspace/);
-    assert.equal((await fetch(base + '/status')).status, 401);
+    assert.equal((await fetch(base + '/status')).status, 200);
     assert.equal((await call('/launch', { links: ['123456'], alias: 'alpha' })).status, 202);
     assert.equal((await call('/launch', { links: ['123456'], alias: 'alpha' })).status, 200);
     assert.equal((await call('/launch', { links: ['bad'], alias: 'alpha' })).status, 400);
@@ -449,7 +449,7 @@ test('HTTP endpoints authenticate, reject stale callbacks, save findings and enf
     assert.equal((await call(`/sessions/${second.id}/retry`, {})).status, 202);
     assert.equal((await callback(`/internal/sessions/${second.id}/analyzing`, { worker_id: second.worker_id })).status, 409);
     assert.equal((await call('/sessions/missing/retry', {})).status, 404);
-    const malformed = await fetch(base + '/launch', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{' });
+    const malformed = await fetch(base + '/launch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
     assert.equal(malformed.status, 400);
   } finally {
     await f.pipeline.stop(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -469,7 +469,7 @@ test('prompt console persists one isolated run per connected worker', async () =
   const two = f.store.create('123456', '123456', 'beta').session;
   f.store.setAgentPolicy('AGENTS.md', '# Shared policy');
   for (const row of [one, two]) { f.store.transition(row.id, 'launching'); f.store.transition(row.id, 'connected', null, `worker:${row.worker_id}`); }
-  const server = createApp(f.pipeline, token, callbackToken, autoexecToken, 'findings', log, fakeAgent, accounts).listen(0, '127.0.0.1');
+  const server = createApp(f.pipeline, callbackToken, autoexecToken, 'findings', log, fakeAgent, accounts).listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const addr = server.address(); assert.ok(addr && typeof addr === 'object');
   try {
@@ -498,7 +498,7 @@ test('disconnect stops the active analysis and offline sessions cannot receive p
   const fakeAgent={configured:true,model:'test',run(_worker: string,_prompt: string,_policy: string,_progress: unknown,_thread: unknown,_started: unknown,signal: AbortSignal) {
     return new Promise<string>((_resolve,reject)=>signal.addEventListener('abort',()=>{aborted=true;reject(new Error('Jogo desconectado'));},{once:true}));
   }} as unknown as AgentRunner;
-  const server=createApp(f.pipeline,token,callbackToken,autoexecToken,'findings',log,fakeAgent,accounts).listen(0,'127.0.0.1');
+  const server=createApp(f.pipeline,callbackToken,autoexecToken,'findings',log,fakeAgent,accounts).listen(0,'127.0.0.1');
   await new Promise<void>(resolve=>server.once('listening',resolve));
   const addr=server.address(); assert.ok(addr && typeof addr==='object');
   const send=()=>fetch(`http://127.0.0.1:${addr.port}/prompts`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({prompt:'observe',scope:'all'})});
@@ -543,7 +543,7 @@ test('account management imports into RAM and persists only the username mapping
     async importCookie(cookie: string) { receivedCookie = cookie; remote = [...remote, 'NewUser']; },
   };
   const f = fixture();
-  const server = createApp(f.pipeline, token, callbackToken, autoexecToken, dir, log, undefined, managed, registry, ram).listen(0, '127.0.0.1');
+  const server = createApp(f.pipeline, callbackToken, autoexecToken, dir, log, undefined, managed, registry, ram).listen(0, '127.0.0.1');
   await new Promise<void>(resolve => server.once('listening', resolve));
   const addr = server.address(); assert.ok(addr && typeof addr === 'object');
   const cookie = 'temporary-cookie-value-1234567890';
@@ -599,15 +599,17 @@ test('Project Real Auto-Execute bootstrap registers the player and never embeds 
   assert.ok(!script.includes(callbackToken));
 });
 
-test('configuration fails closed for absent authorization, placeholder tokens and nonlocal origins', () => {
-  const base = { PIPELINE_TOKEN: token, INTERNAL_CALLBACK_TOKEN: callbackToken, AUTOEXEC_TOKEN: autoexecToken, AUTHORIZED_PLACE_IDS: '123456', ACCOUNTS_FILE: join(process.cwd(), 'accounts.example.json') };
-  assert.equal(loadConfig(base).authorized.has('123456'), true);
-  assert.equal(loadConfig(base).ramUrl, 'http://127.0.0.1:7963');
+test('configuration generates internal credentials and rejects unsafe origins', () => {
+  const base = { AUTHORIZED_PLACE_IDS: '123456', ACCOUNTS_FILE: join(process.cwd(), 'accounts.example.json') };
+  const generated = loadConfig(base);
+  assert.equal(generated.authorized.has('123456'), true);
+  assert.equal(generated.ramUrl, 'http://127.0.0.1:7963');
+  assert.ok(generated.callbackToken.length >= 24);
+  assert.ok(generated.autoexecToken.length >= 24);
+  assert.notEqual(generated.callbackToken, generated.autoexecToken);
   assert.throws(() => loadConfig({ ...base, AUTHORIZED_PLACE_IDS: '' }));
-  assert.throws(() => loadConfig({ ...base, PIPELINE_TOKEN: 'short' }));
-  assert.throws(() => loadConfig({ ...base, PIPELINE_TOKEN: 'replace-with-a-long-random-secret' }));
-  assert.throws(() => loadConfig({ ...base, INTERNAL_CALLBACK_TOKEN: token }));
-  assert.throws(() => loadConfig({ ...base, AUTOEXEC_TOKEN: callbackToken }));
+  assert.throws(() => loadConfig({ ...base, INTERNAL_CALLBACK_TOKEN: 'short' }));
+  assert.throws(() => loadConfig({ ...base, INTERNAL_CALLBACK_TOKEN: token, AUTOEXEC_TOKEN: token }));
   assert.throws(() => loadConfig({ ...base, HOST: '0.0.0.0' }));
   assert.throws(() => loadConfig({ ...base, RAM_URL: 'http://external.test' }));
   assert.throws(() => loadConfig({ ...base, RAM_PASSWORD: 'short' }));

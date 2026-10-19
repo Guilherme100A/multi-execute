@@ -14,13 +14,11 @@ export async function runBatch(links: string[], accounts: Account[], submit: (li
 async function main(): Promise<void> {
   const [file, ...extra] = process.argv.slice(2);
   if (!file || extra.length) throw new Error('Usage: npm run batch -- links.txt');
-  const token = process.env.PIPELINE_TOKEN;
-  if (!token || token.length < 24 || /^replace-with-/i.test(token)) throw new Error('Configure PIPELINE_TOKEN with a non-placeholder secret');
   const links = readFileSync(file, 'utf8').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
   const accounts = parseAccounts(JSON.parse(readFileSync(process.env.ACCOUNTS_FILE ?? 'accounts.json', 'utf8')) as unknown);
   const base = new URL(process.env.PIPELINE_URL ?? `http://127.0.0.1:${process.env.PORT ?? 3000}`);
   if (base.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(base.hostname) || base.username || base.password || base.pathname !== '/' || base.search || base.hash) throw new Error('PIPELINE_URL must be a loopback HTTP origin');
-  const client = new HttpClient(base.origin, token);
+  const client = new HttpClient(base.origin);
   await runBatch(links, accounts, async (link, alias) => {
     const result = await client.request('/launch', 'POST', { links: [link], alias });
     console.log(JSON.stringify({ alias, link, result }));

@@ -1,5 +1,4 @@
 const $ = id => document.getElementById(id);
-let token = sessionStorage.getItem('pipeline-token') || '';
 let selected = null;
 let agentConfigured = false;
 let liveController = null;
@@ -26,7 +25,7 @@ function showView(name) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.body ? { 'content-type': 'application/json' } : {}), ...options.headers } });
+  const response = await fetch(path, { ...options, headers: { ...(options.body ? { 'content-type': 'application/json' } : {}), ...options.headers } });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
   return body;
@@ -35,7 +34,6 @@ async function api(path, options = {}) {
 async function connect() {
   const config = await loadConfig();
   $('model').textContent = config.agent.configured ? `${config.agent.provider} · ${config.agent.model}` : 'CLI NÃO CONFIGURADA';
-  $('login').hidden = true; $('dashboard').hidden = false;
   await refresh();
   startLiveFeed();
 }
@@ -292,7 +290,7 @@ async function startLiveFeed() {
   while (!controller.signal.aborted) {
   let watchdog;
   try {
-    const response=await fetch('/events',{headers:{authorization:`Bearer ${token}`},signal:controller.signal});
+    const response=await fetch('/events',{signal:controller.signal});
     if (!response.ok || !response.body) throw new Error(`Live feed HTTP ${response.status}`);
     const reader=response.body.getReader(); const decoder=new TextDecoder(); let buffer='';
     const armWatchdog=()=>{ clearTimeout(watchdog); watchdog=setTimeout(()=>reader.cancel().catch(()=>{}),25000); };
@@ -322,7 +320,6 @@ async function startLiveFeed() {
 }
 
 function showFatal(error) { $('healthDot').className='dot offline'; $('healthText').textContent=error.message; }
-$('loginForm').onsubmit = async event => { event.preventDefault(); token=$('token').value.trim(); try { await connect(); sessionStorage.setItem('pipeline-token',token); } catch(error) { $('loginError').textContent=error.message; } };
 $('launchForm').onsubmit = async event => {
   event.preventDefault(); $('launchButton').disabled=true; $('launchMessage').textContent='';
   try {
@@ -355,5 +352,5 @@ $('policyFile').onchange=async()=>{ const file=$('policyFile').files[0]; if (!fi
 $('policyEditor').onsubmit=async event=>{ event.preventDefault(); const file=$('policyFile').files[0]; const filename=file?.name || ($('policyFilename').textContent.split(' ·')[0] || 'AGENTS.md'); try { const data=await api('/agent-policy',{method:'POST',body:JSON.stringify({filename,content:$('policyContent').value})}); $('policyFilename').textContent=`${data.policy.filename} · salvo globalmente`; $('policyMessage').textContent='Instruções aplicadas a todas as sessões.'; } catch(error) { $('policyMessage').textContent=error.message; } };
 $('syncAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent=''; try { await api('/accounts/sync',{method:'POST',body:JSON.stringify({alias:$('syncAlias').value.trim(),username:$('ramAccount').value})}); $('syncAlias').value=''; await loadConfig(); $('accountMessage').textContent='Conta adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
 $('importAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent='Salvando a sessão criptografada…'; const cookie=$('securityCookie').value; $('securityCookie').value=''; try { await api('/accounts/import',{method:'POST',body:JSON.stringify({alias:$('importAlias').value.trim(),cookie})}); $('importAlias').value=''; await loadConfig(); await refreshRam(); $('accountMessage').textContent='Conta protegida pelo Windows e adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
-if (token) connect().catch(() => { sessionStorage.removeItem('pipeline-token'); token=''; });
+connect().catch(showFatal);
 document.addEventListener('visibilitychange',()=>{ if (!document.hidden && !$('dashboard').hidden && !feedConnected) startLiveFeed(); });

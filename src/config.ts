@@ -1,16 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { parseAccounts, placeId } from './validation.js';
 
 export function loadConfig(env = process.env) {
-  const token = env.PIPELINE_TOKEN ?? '';
-  const callbackToken = env.INTERNAL_CALLBACK_TOKEN ?? '';
-  const autoexecToken = env.AUTOEXEC_TOKEN ?? '';
+  const callbackToken = env.INTERNAL_CALLBACK_TOKEN ?? randomBytes(32).toString('hex');
+  const autoexecToken = env.AUTOEXEC_TOKEN ?? randomBytes(32).toString('hex');
   const invalidSecret = (value: string) => value.length < 24 || /^replace-with-/i.test(value);
-  if (invalidSecret(token)) throw new Error('PIPELINE_TOKEN must be a non-placeholder secret of at least 24 characters');
-  if (invalidSecret(callbackToken) || callbackToken === token) throw new Error('INTERNAL_CALLBACK_TOKEN must be a different non-placeholder secret of at least 24 characters');
-  if (invalidSecret(autoexecToken) || autoexecToken === token || autoexecToken === callbackToken) throw new Error('AUTOEXEC_TOKEN must be a third, different non-placeholder secret of at least 24 characters');
+  if (invalidSecret(callbackToken)) throw new Error('INTERNAL_CALLBACK_TOKEN must be a non-placeholder secret of at least 24 characters when configured');
+  if (invalidSecret(autoexecToken) || autoexecToken === callbackToken) throw new Error('AUTOEXEC_TOKEN must be a different non-placeholder secret of at least 24 characters when configured');
   const host = env.HOST ?? '127.0.0.1';
   if (!['127.0.0.1', '::1'].includes(host)) throw new Error('HOST must be loopback');
   const port = Number(env.PORT ?? 3000);
@@ -49,7 +48,7 @@ export function loadConfig(env = process.env) {
   if (!/^[A-Za-z0-9_.-]{1,80}$/.test(claudeCliCommand)) throw new Error('Invalid CLAUDE_CLI_COMMAND');
   if (!/^[A-Za-z0-9._-]{1,80}$/.test(agentModel)) throw new Error('Invalid AGENT_MODEL');
   return {
-    host, port, token, callbackToken, autoexecToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
+    host, port, callbackToken, autoexecToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
     ramPassword, mcpToken: env.MCP_TOKEN ?? '',
     launchBackend, directAccountsFile: resolve(env.DIRECT_ACCOUNTS_FILE ?? 'data/roblox-accounts.dpapi'),
     autoConnect: env.AUTO_CONNECT !== 'false',

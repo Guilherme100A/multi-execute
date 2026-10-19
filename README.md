@@ -34,13 +34,7 @@ npm run setup:real
 npm start
 ```
 
-Gere três segredos diferentes:
-
-```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-```
-
-Use valores distintos em `PIPELINE_TOKEN`, `INTERNAL_CALLBACK_TOKEN` e `AUTOEXEC_TOKEN`. Placeholders, segredos com menos de 24 caracteres e valores repetidos são recusados.
+O painel é exclusivamente local e não possui login. O Launcher gera automaticamente credenciais temporárias para os callbacks internos do agente e do Auto Execute. Se precisar que essas credenciais permaneçam iguais depois de reiniciar o Launcher, defina opcionalmente `INTERNAL_CALLBACK_TOKEN` e `AUTOEXEC_TOKEN` com valores distintos de pelo menos 24 caracteres.
 
 O arquivo local `accounts.json` segue este formato:
 
@@ -104,7 +98,7 @@ O arquivo gerado contém `AUTOEXEC_TOKEN`, por isso é ignorado pelo Git. Ele es
 
 ## Interface web
 
-Abra `http://127.0.0.1:3000`. A interface pede `PIPELINE_TOKEN` e guarda o valor apenas em `sessionStorage` da aba.
+Abra `http://127.0.0.1:3000`. A interface entra diretamente, sem token ou tela de login, e o servidor recusa configuração fora do loopback.
 
 O mapa interativo da arquitetura fica em `http://127.0.0.1:3000/architecture.html`. Ele detalha visualmente a seleção do cliente pelo Project Real, a injeção do bootstrap, o registro no roblox-mcp-difz e o proxy MCP isolado de cada terminal.
 
@@ -168,7 +162,7 @@ A sessão é conectada somente quando `/api/sessions` contém `status: "active"`
 
 ## API do Launcher
 
-Todos os endpoints abaixo exigem `Authorization: Bearer <PIPELINE_TOKEN>`, exceto os callbacks internos, que usam seus tokens separados.
+A API do painel é acessível sem login somente no próprio computador, pois `HOST` aceita apenas loopback. Rotas `/internal/*` continuam autenticadas por credenciais geradas pelo Launcher e não aparecem na interface.
 
 | Endpoint | Função |
 | --- | --- |

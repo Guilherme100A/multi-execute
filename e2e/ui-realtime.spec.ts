@@ -29,7 +29,6 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
   let navigations=0; page.on('framenavigated',frame=>{if(frame===page.mainFrame()) navigations++;});
   try {
     await page.goto(`http://127.0.0.1:${address.port}`);
-    await page.locator('#token').fill('test-token'); await page.locator('#loginForm button').click();
     await expect(page.locator('#navSessionCount')).toHaveText('7');
     await expect(page.locator('#accountChoices .account-choice')).toHaveCount(3);
     await expect(page.locator('#accountChoices input:checked')).toHaveCount(3);
