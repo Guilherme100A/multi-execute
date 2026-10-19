@@ -9,6 +9,7 @@ let feedConnected = false;
 let lastSnapshot = null;
 let agentProviders=[];
 let currentAgent=null;
+let launchAccounts=[];
 const liveStatuses = new Set(['connected', 'analyzing']);
 const labels = {connected:'Conectada', analyzing:'Analisando', pending:'Na fila', launching:'Conectando', failed:'Falhou', disconnected:'Desconectada', done:'Concluída'};
 
@@ -48,10 +49,38 @@ async function loadConfig() {
   $('agentProvider').value=currentAgent.provider;
   renderModelOptions(currentAgent.model);
   $('model').textContent=`${config.agent.provider} · ${config.agent.model}`;
+  launchAccounts=config.accounts;
   $('account').replaceChildren(...config.accounts.map(row => new Option(`${row.alias} (${row.username})`, row.alias)));
+  renderAccountChoices();
   $('prompt').disabled = !agentConfigured; $('sendPrompt').disabled = !agentConfigured;
   if (!agentConfigured) $('prompt').placeholder = 'Instale e autentique a CLI escolhida para habilitar o agente';
   return config;
+}
+
+function renderAccountChoices() {
+  const previous=new Set([...$('accountChoices').querySelectorAll('input:checked')].map(input=>input.value));
+  $('accountChoices').replaceChildren(...launchAccounts.map((account,index)=>{
+    const label=document.createElement('label'); label.className='account-choice';
+    const input=document.createElement('input'); input.type='checkbox'; input.value=account.alias;
+    input.checked=previous.has(account.alias) || (!previous.size && index<Math.min(10,launchAccounts.length));
+    input.onchange=()=>{ if ($('accountChoices').querySelectorAll('input:checked').length>10) input.checked=false; updateSelectedAccounts(); };
+    const face=document.createElement('span'); face.className='account-face'; face.textContent=account.alias.slice(0,1).toUpperCase();
+    const text=document.createElement('span'); const alias=document.createElement('b'); alias.textContent=account.alias;
+    const username=document.createElement('small'); username.textContent=account.username; text.append(alias,username);
+    const check=document.createElement('i'); check.textContent='✓'; label.append(input,face,text,check); return label;
+  }));
+  updateSelectedAccounts();
+}
+
+function updateSelectedAccounts() {
+  const count=$('accountChoices').querySelectorAll('input:checked').length;
+  $('selectedAccountCount').textContent=`${count} ${count===1?'conta selecionada':'contas selecionadas'} · máximo 10`;
+}
+
+function syncLaunchMode() {
+  const group=document.querySelector('input[name="launchMode"]:checked').value==='group';
+  $('groupLaunchFields').hidden=!group; $('roundRobinFields').hidden=group;
+  $('groupGame').required=group; $('game').required=!group; $('account').required=!group;
 }
 
 function renderModelOptions(model) {
@@ -155,12 +184,14 @@ function createTerminal(session) {
   const panel=document.createElement('article'); panel.className='worker-terminal card'; panel.dataset.sessionId=session.id;
   const head=document.createElement('div'); head.className='worker-terminal-head';
   const identity=document.createElement('div');
-  const live=document.createElement('span'); live.className='worker-live';
+  const controls=document.createElement('span'); controls.className='window-controls';
+  const live=document.createElement('i'); live.className='worker-live';
+  const middle=document.createElement('i'); const end=document.createElement('i'); controls.append(live,middle,end);
   const title=document.createElement('h3'); title.className='worker-title';
   const worker=document.createElement('p'); worker.className='worker-id';
   identity.append(title,worker);
   const badge=document.createElement('span'); badge.className='status';
-  head.append(live,identity,badge);
+  head.append(controls,identity,badge);
   const output=document.createElement('div'); output.className='worker-terminal-output';
   const form=document.createElement('form'); form.className='worker-prompt-form';
   const input=document.createElement('textarea'); input.rows=2; input.maxLength=8000; input.required=true;
@@ -227,7 +258,7 @@ function applySnapshot(status, prompts) {
   const pending=status.sessions.filter(row=>['pending','launching'].includes(row.status));
   const history=status.sessions.filter(row=>!liveStatuses.has(row.status) && !['pending','launching'].includes(row.status)).reverse();
   $('healthDot').className=`dot ${live.length ? 'online':'offline'}`;
-  $('healthText').textContent=!feedConnected ? 'Reconectando painel…' : !status.mcp_online ? 'Conexão Roblox indisponível' : `${live.length} ${live.length===1?'jogo conectado':'jogos conectados'}`;
+  $('healthText').textContent=!feedConnected ? 'Reconectando painel…' : !status.mcp_online ? 'Conexão Roblox indisponível' : `${live.length} ${live.length===1?'sessão conectada':'sessões conectadas'}`;
   if (status.automation) {
     const labels={starting:'Preparando conexão automática…',connecting:'Conectando jogos e workers automaticamente…',ready:'Conexão automática pronta',error:'Falha na conexão automática',stopped:'Conexão automática desativada'};
     $('automationText').textContent=status.automation.error || labels[status.automation.state] || '';
@@ -292,9 +323,31 @@ async function startLiveFeed() {
 
 function showFatal(error) { $('healthDot').className='dot offline'; $('healthText').textContent=error.message; }
 $('loginForm').onsubmit = async event => { event.preventDefault(); token=$('token').value.trim(); try { await connect(); sessionStorage.setItem('pipeline-token',token); } catch(error) { $('loginError').textContent=error.message; } };
-$('launchForm').onsubmit = async event => { event.preventDefault(); $('launchButton').disabled=true; $('launchMessage').textContent=''; try { const links=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean); const data=await api(links.length>1?'/launch-batch':'/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links})}); selected=data.sessions[0]?.session?.id || selected; $('launchMessage').textContent=`${data.sessions.length} sessão(ões) adicionada(s). Os workers serão conectados automaticamente.`; $('game').value=''; await refresh(); showView('sessions'); } catch(error) { $('launchMessage').textContent=error.message; } finally { $('launchButton').disabled=false; } };
+$('launchForm').onsubmit = async event => {
+  event.preventDefault(); $('launchButton').disabled=true; $('launchMessage').textContent='';
+  try {
+    const group=document.querySelector('input[name="launchMode"]:checked').value==='group';
+    let data;
+    if (group) {
+      const aliases=[...$('accountChoices').querySelectorAll('input:checked')].map(input=>input.value);
+      if (!aliases.length) throw new Error('Selecione pelo menos uma conta.');
+      data=await api('/launch-group',{method:'POST',body:JSON.stringify({link:$('groupGame').value.trim(),aliases})});
+      $('groupGame').value='';
+    } else {
+      const links=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);
+      data=await api(links.length>1?'/launch-batch':'/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links})});
+      $('game').value='';
+    }
+    selected=data.sessions[0]?.session?.id || selected;
+    $('launchMessage').textContent=`${data.sessions.length} sessão(ões) adicionada(s). Cada conta receberá um worker e terminal próprios.`;
+    await refresh(); showView('sessions');
+  } catch(error) { $('launchMessage').textContent=error.message; } finally { $('launchButton').disabled=false; }
+};
 $('promptForm').onsubmit = async event => { event.preventDefault(); $('promptError').textContent=''; $('sendPrompt').disabled=true; try { await api('/prompts',{method:'POST',body:JSON.stringify({prompt:$('prompt').value.trim(),scope:'all'})}); $('prompt').value=''; await refresh(); } catch(error) { $('promptError').textContent=error.message; } finally { $('sendPrompt').disabled=false; } };
 document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>showView(button.dataset.view));
+document.querySelectorAll('input[name="launchMode"]').forEach(input=>input.onchange=syncLaunchMode);
+$('selectAllAccounts').onclick=()=>{ $('accountChoices').querySelectorAll('input').forEach((input,index)=>{input.checked=index<10;}); updateSelectedAccounts(); };
+syncLaunchMode();
 $('accountsToggle').onclick=async()=>{ $('accountManager').hidden=false; await refreshRam(); };
 $('accountsClose').onclick=()=>{ $('accountManager').hidden=true; };
 $('policyToggle').onclick=async()=>{ $('policyEditor').hidden=!$('policyEditor').hidden; if (!$('policyEditor').hidden) await loadPolicy(); };

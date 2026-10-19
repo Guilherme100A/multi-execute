@@ -108,7 +108,8 @@ Abra `http://127.0.0.1:3000`. A interface pede `PIPELINE_TOKEN` e guarda o valor
 
 O mapa interativo da arquitetura fica em `http://127.0.0.1:3000/architecture.html`. Ele detalha visualmente a seleção do cliente pelo Project Real, a injeção do bootstrap, o registro no roblox-mcp-difz e o proxy MCP isolado de cada terminal.
 
-- **Abrir jogo:** escolha uma conta e informe URL ou PlaceId.
+- **Mesmo jogo:** informe uma URL ou PlaceId e marque até 10 contas. O Launcher abre todas no mesmo jogo com workers, conexões MCP e terminais independentes.
+- **Jogos diferentes:** informe um link por linha; o Launcher distribui os jogos pelas contas em round-robin.
 - **Gerenciar contas:** consulte sessões importadas no cofre local ou salve uma nova conta sem editar JSON manualmente.
 - **Sessões:** acompanhe os estados e use retry quando permitido.
 - **Console:** cada sessão possui seu próprio terminal, histórico e campo de prompt. O compositor superior envia o mesmo prompt para todas as sessões conectadas. Estados e respostas chegam por um feed HTTP persistente, sem recarregar a página.
@@ -176,6 +177,7 @@ Todos os endpoints abaixo exigem `Authorization: Bearer <PIPELINE_TOKEN>`, excet
 | `GET /events` | Feed autenticado `text/event-stream` com sessões e execuções em tempo real |
 | `POST /launch` | `{ "links": ["123456"], "alias": "conta-teste" }` |
 | `POST /launch-batch` | Distribui um link por conta; valida o lote inteiro antes de criar sessões |
+| `POST /launch-group` | `{ "link": "123456", "aliases": ["conta1", "conta2"] }`; abre o mesmo jogo em até 10 contas distintas |
 | `POST /attach` | `{ "link": "123456", "alias": "conta-teste" }`; conecta um jogo já aberto sem lançar outro cliente |
 | `POST /sessions/:id/retry` | Um único retry para failed/disconnected |
 | `GET /prompts` | Histórico persistido do console |

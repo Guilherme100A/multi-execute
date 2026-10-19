@@ -31,11 +31,24 @@
 
       <div id="homeView" class="view">
       <section class="launch card">
-        <div><p class="label">NOVA SESSÃO</p><h2>Abrir jogo</h2><button id="accountsToggle" type="button" class="ghost compact">Gerenciar contas</button></div>
+        <div><p class="label">NOVAS SESSÕES</p><h2>Abrir jogos</h2><p class="muted launch-description">Distribua várias contas no mesmo jogo ou cada conta em um jogo diferente.</p><button id="accountsToggle" type="button" class="ghost compact">Gerenciar contas</button></div>
         <form id="launchForm">
-          <label>Conta<select id="account" required></select></label>
-          <label class="wide">Links dos jogos (um por linha)<textarea id="game" rows="3" placeholder="https://www.roblox.com/games/123456789" required></textarea></label>
-          <button id="launchButton">Iniciar</button>
+          <fieldset class="launch-mode" aria-label="Modo de distribuição">
+            <label><input type="radio" name="launchMode" value="group" checked><span><b>Mesmo jogo</b><small>Até 10 contas no mesmo PlaceId</small></span></label>
+            <label><input type="radio" name="launchMode" value="round-robin"><span><b>Jogos diferentes</b><small>Um link para cada conta</small></span></label>
+          </fieldset>
+          <div id="groupLaunchFields" class="launch-fields">
+            <label class="wide">Link do jogo<input id="groupGame" placeholder="https://www.roblox.com/games/123456789"></label>
+            <div class="account-choice-head"><span>Contas para este jogo</span><button id="selectAllAccounts" type="button" class="text-button">Selecionar até 10</button></div>
+            <div id="accountChoices" class="account-choices"></div>
+            <p id="selectedAccountCount" class="selection-count">0 contas selecionadas</p>
+          </div>
+          <div id="roundRobinFields" class="launch-fields" hidden>
+            <label>Começar pela conta<select id="account"></select></label>
+            <label class="wide">Links dos jogos (um por linha)<textarea id="game" rows="4" placeholder="https://www.roblox.com/games/123456789"></textarea></label>
+            <p class="muted wide">Os links serão distribuídos em ordem pelas contas disponíveis.</p>
+          </div>
+          <button id="launchButton" class="launch-submit">Iniciar sessões</button>
         </form>
         <p id="launchMessage" class="message"></p>
         <p id="automationText" class="muted" role="status">Preparando conexão automática…</p>
@@ -77,7 +90,7 @@
       <div id="consoleView" class="view" hidden>
         <section class="console-shell">
           <div class="terminal-head">
-            <div><p class="label">SEU WORKSPACE</p><h2>Terminais ao vivo</h2><p class="muted">Um agente por jogo. A conexão determina quais terminais ficam ativos.</p></div>
+            <div><p class="label">SEU WORKSPACE</p><h2>Terminais ao vivo</h2><p class="muted">Um agente por sessão. Dez contas no mesmo jogo continuam com terminais independentes.</p></div>
             <div class="terminal-badges"><button id="policyToggle" type="button" class="ghost compact">AGENTS.md global</button><span id="model" class="model"></span></div>
           </div>
           <form id="agentSettingsForm" class="agent-settings card">

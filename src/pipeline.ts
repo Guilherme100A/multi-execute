@@ -29,6 +29,18 @@ export class Pipeline {
   }
 
   registeredUsername(alias: string): string | undefined { return this.accounts.find(row => row.alias === alias)?.robloxUsername; }
+  launchGroup(link: unknown, aliases: unknown): { session: Session; reused: boolean }[] {
+    if (typeof link !== 'string') throw new InputError('link must be a string');
+    if (!Array.isArray(aliases) || !aliases.length || aliases.length > 10) throw new InputError('Selecione entre 1 e 10 contas');
+    const selected = aliases.map(aliasValue);
+    if (new Set(selected).size !== selected.length) throw new InputError('As contas selecionadas devem ser distintas');
+    for (const alias of selected) if (!this.accounts.some(account => account.alias === alias)) throw new InputError(`Unknown account alias: ${alias}`);
+    const game = placeId(link);
+    if (!this.authorized.has(game)) throw new InputError(`PlaceId ${game} is not in AUTHORIZED_PLACE_IDS`);
+    const result = selected.map(alias => this.store.create(link, game, alias));
+    this.log.info('launch_group_queued', { place_id: game, accounts: selected, ids: result.map(row => row.session.id) });
+    this.kick(); return result;
+  }
   launchBatch(links: unknown, firstAlias: unknown): { session: Session; reused: boolean }[] {
     const first = aliasValue(firstAlias);
     const index = this.accounts.findIndex(account => account.alias === first);

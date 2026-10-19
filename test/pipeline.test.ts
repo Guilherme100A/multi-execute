@@ -128,6 +128,19 @@ test('batch validation is atomic and only authorized configured games are accept
   } finally { await f.pipeline.stop(); f.store.close(); }
 });
 
+test('one authorized game can be queued for several distinct accounts', async () => {
+  const f = fixture();
+  try {
+    const rows = f.pipeline.launchGroup('https://www.roblox.com/games/123456/Test', ['alpha', 'beta']);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map(row => [row.session.account_alias, row.session.place_id]), [['alpha', '123456'], ['beta', '123456']]);
+    assert.equal(new Set(rows.map(row => row.session.worker_id)).size, 2);
+    assert.throws(() => f.pipeline.launchGroup('123456', ['alpha', 'alpha']), /distint/i);
+    assert.throws(() => f.pipeline.launchGroup('654321', ['alpha', 'unknown']), /Unknown account/);
+    assert.equal(f.store.all().length, 2);
+  } finally { await f.pipeline.stop(); f.store.close(); }
+});
+
 test('restart fails uncertain connected claims and revoked sessions without executing again', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'pipeline-recovery-'));
   const path = join(dir, 'db.sqlite');

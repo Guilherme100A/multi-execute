@@ -152,6 +152,10 @@ export function createApp(pipeline: Pipeline, token: string, callbackToken: stri
   app.post('/launch-batch', (req, res) => {
     res.status(202).json({ sessions: pipeline.launchBatch(req.body?.links, req.body?.alias) });
   });
+  app.post('/launch-group', (req, res) => {
+    const result = pipeline.launchGroup(req.body?.link, req.body?.aliases);
+    res.status(result.every(row => row.reused) ? 200 : 202).json({ sessions: result });
+  });
   app.post('/attach', (req, res) => {
     res.status(202).json({ session: pipeline.attach(req.body?.link, req.body?.alias) });
   });
