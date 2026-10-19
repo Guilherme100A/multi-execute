@@ -14,11 +14,11 @@ test('links open both games, connect workers automatically, and return real work
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
   await expect(page.locator('#dashboard')).toBeVisible();
-  await page.locator('input[name="launchMode"][value="round-robin"]').check();
+  await page.locator('[data-view="games"]').click();
   await page.locator('#account').selectOption(accounts[0]!.alias);
   await page.locator('#game').fill(links.join('\n'));
   const launching = page.waitForResponse(response => response.url().endsWith('/launch-batch') && response.request().method() === 'POST');
-  await page.locator('#launchButton').click();
+  await page.locator('#gamesLaunchButton').click();
   const response = await launching;
   expect(response.status()).toBe(202);
   const body = await response.json() as { sessions: { session: { id: string; worker_id: string; account_alias: string } }[] };

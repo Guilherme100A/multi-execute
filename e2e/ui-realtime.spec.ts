@@ -30,11 +30,12 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
   try {
     await page.goto(`http://127.0.0.1:${address.port}`);
     await expect(page.locator('#navSessionCount')).toHaveText('7');
+    await page.locator('[data-view="group"]').click();
     await expect(page.locator('#accountChoices .account-choice')).toHaveCount(3);
     await expect(page.locator('#accountChoices input:checked')).toHaveCount(3);
     await page.screenshot({path:info.outputPath('multi-account-launch.png'),fullPage:true});
     await page.locator('#groupGame').fill('https://www.roblox.com/games/123456/Test');
-    await page.locator('#launchButton').click();
+    await page.locator('#groupLaunchButton').click();
     await expect.poll(()=>groupLaunch).toEqual({link:'https://www.roblox.com/games/123456/Test',aliases:['alpha','beta','gamma']});
     await page.locator('[data-view="console"]').click();
     await expect(page.locator('.worker-terminal')).toHaveCount(7);

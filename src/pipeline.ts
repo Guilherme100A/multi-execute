@@ -45,7 +45,7 @@ export class Pipeline {
     const first = aliasValue(firstAlias);
     const index = this.accounts.findIndex(account => account.alias === first);
     if (index < 0) throw new InputError('Unknown account alias');
-    if (!Array.isArray(links) || !links.length || links.length > this.accounts.length) throw new InputError('Informe no máximo um link por conta disponível');
+    if (!Array.isArray(links) || !links.length || links.length > Math.min(this.accounts.length, 10)) throw new InputError('Informe no máximo 10 links, limitados às contas disponíveis');
     const games = links.map(placeId);
     for (const game of games) if (!this.authorized.has(game)) throw new InputError(`PlaceId ${game} is not in AUTHORIZED_PLACE_IDS`);
     return links.flatMap((link, offset) => this.launch([link], this.accounts[(index + offset) % this.accounts.length]!.alias));

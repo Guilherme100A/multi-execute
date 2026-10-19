@@ -21,3 +21,4 @@ input,textarea,select{min-width:0;border:1px solid var(--line);border-radius:7px
 @media(max-width:1350px){.terminal-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:900px){.launch{grid-template-columns:1fr}.terminal-grid{grid-template-columns:1fr}.worker-terminal-output{height:320px}}
 @media(max-width:700px){.launch-mode{grid-template-columns:1fr}.account-choices{grid-template-columns:1fr}.launch{padding:20px}}
+.launch .message,.launch>.automation-status{grid-column:auto}.launch>.automation-status{margin-top:14px}.nav-arrow{color:#666;font:400 10px ui-monospace,monospace}.link-count-row{display:flex;justify-content:space-between;gap:20px;color:#6d757c;font:9px ui-monospace,monospace}.link-count-row small{color:#596168}.link-count-row .over-limit{color:var(--red)}.accounts-panel{margin-top:0;background:linear-gradient(145deg,#121416,#0b0c0d);border-color:#303337}

@@ -20,7 +20,7 @@ function setFeedConnected(connected) {
 }
 
 function showView(name) {
-  for (const view of ['home','sessions','console']) $(`${view}View`).hidden = view !== name;
+  for (const view of ['accounts','group','games','sessions','console']) $(`${view}View`).hidden = view !== name;
   document.querySelectorAll('.nav-button').forEach(button => button.classList.toggle('active', button.dataset.view === name));
 }
 
@@ -35,6 +35,7 @@ async function connect() {
   const config = await loadConfig();
   $('model').textContent = config.agent.configured ? `${config.agent.provider} · ${config.agent.model}` : 'CLI NÃO CONFIGURADA';
   await refresh();
+  await refreshRam();
   startLiveFeed();
 }
 
@@ -73,12 +74,6 @@ function renderAccountChoices() {
 function updateSelectedAccounts() {
   const count=$('accountChoices').querySelectorAll('input:checked').length;
   $('selectedAccountCount').textContent=`${count} ${count===1?'conta selecionada':'contas selecionadas'} · máximo 10`;
-}
-
-function syncLaunchMode() {
-  const group=document.querySelector('input[name="launchMode"]:checked').value==='group';
-  $('groupLaunchFields').hidden=!group; $('roundRobinFields').hidden=group;
-  $('groupGame').required=group; $('game').required=!group; $('account').required=!group;
 }
 
 function renderModelOptions(model) {
@@ -142,7 +137,7 @@ function sessionCard(row) {
   card.append(top, meta, footer);
   if (['failed','disconnected'].includes(row.status) && row.retry_count === 0) {
     const retry = document.createElement('button'); retry.className = 'retry'; retry.textContent = 'Tentar novamente';
-    retry.onclick = async event => { event.stopPropagation(); retry.disabled=true; try { await api(`/sessions/${row.id}/retry`, { method:'POST' }); await refresh(); } catch(error) { $('launchMessage').textContent=error.message; showView('home'); } finally { retry.disabled=false; } };
+    retry.onclick = async event => { event.stopPropagation(); retry.disabled=true; try { await api(`/sessions/${row.id}/retry`, { method:'POST' }); await refresh(); } catch(error) { $('gamesLaunchMessage').textContent=error.message; showView('games'); } finally { retry.disabled=false; } };
     footer.prepend(retry);
   }
   card.onclick = () => {
@@ -259,7 +254,7 @@ function applySnapshot(status, prompts) {
   $('healthText').textContent=!feedConnected ? 'Reconectando painel…' : !status.mcp_online ? 'Conexão Roblox indisponível' : `${live.length} ${live.length===1?'sessão conectada':'sessões conectadas'}`;
   if (status.automation) {
     const labels={starting:'Preparando conexão automática…',connecting:'Conectando jogos e workers automaticamente…',ready:'Conexão automática pronta',error:'Falha na conexão automática',stopped:'Conexão automática desativada'};
-    $('automationText').textContent=status.automation.error || labels[status.automation.state] || '';
+    document.querySelectorAll('.automation-status').forEach(element=>{element.textContent=status.automation.error || labels[status.automation.state] || '';});
   }
   $('sessionCount').textContent=String(live.length);
   $('navSessionCount').textContent=String(live.length);
@@ -320,33 +315,34 @@ async function startLiveFeed() {
 }
 
 function showFatal(error) { $('healthDot').className='dot offline'; $('healthText').textContent=error.message; }
-$('launchForm').onsubmit = async event => {
-  event.preventDefault(); $('launchButton').disabled=true; $('launchMessage').textContent='';
+$('groupLaunchForm').onsubmit = async event => {
+  event.preventDefault(); $('groupLaunchButton').disabled=true; $('groupLaunchMessage').textContent='';
   try {
-    const group=document.querySelector('input[name="launchMode"]:checked').value==='group';
-    let data;
-    if (group) {
-      const aliases=[...$('accountChoices').querySelectorAll('input:checked')].map(input=>input.value);
-      if (!aliases.length) throw new Error('Selecione pelo menos uma conta.');
-      data=await api('/launch-group',{method:'POST',body:JSON.stringify({link:$('groupGame').value.trim(),aliases})});
-      $('groupGame').value='';
-    } else {
-      const links=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);
-      data=await api(links.length>1?'/launch-batch':'/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links})});
-      $('game').value='';
-    }
+    const aliases=[...$('accountChoices').querySelectorAll('input:checked')].map(input=>input.value);
+    if (!aliases.length) throw new Error('Selecione pelo menos uma conta.');
+    const data=await api('/launch-group',{method:'POST',body:JSON.stringify({link:$('groupGame').value.trim(),aliases})});
+    $('groupGame').value='';
     selected=data.sessions[0]?.session?.id || selected;
-    $('launchMessage').textContent=`${data.sessions.length} sessão(ões) adicionada(s). Cada conta receberá um worker e terminal próprios.`;
+    $('groupLaunchMessage').textContent=`${data.sessions.length} conta(s) enviada(s) ao mesmo jogo, cada uma com worker próprio.`;
     await refresh(); showView('sessions');
-  } catch(error) { $('launchMessage').textContent=error.message; } finally { $('launchButton').disabled=false; }
+  } catch(error) { $('groupLaunchMessage').textContent=error.message; } finally { $('groupLaunchButton').disabled=false; }
+};
+$('gamesLaunchForm').onsubmit = async event => {
+  event.preventDefault(); $('gamesLaunchButton').disabled=true; $('gamesLaunchMessage').textContent='';
+  try {
+    const links=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean);
+    if (links.length>10) throw new Error('Informe no máximo 10 jogos.');
+    const data=await api(links.length>1?'/launch-batch':'/launch',{method:'POST',body:JSON.stringify({alias:$('account').value,links})});
+    $('game').value=''; updateGameLinkCount(); selected=data.sessions[0]?.session?.id || selected;
+    $('gamesLaunchMessage').textContent=`${data.sessions.length} jogo(s) distribuído(s), um por conta.`;
+    await refresh(); showView('sessions');
+  } catch(error) { $('gamesLaunchMessage').textContent=error.message; } finally { $('gamesLaunchButton').disabled=false; }
 };
 $('promptForm').onsubmit = async event => { event.preventDefault(); $('promptError').textContent=''; $('sendPrompt').disabled=true; try { await api('/prompts',{method:'POST',body:JSON.stringify({prompt:$('prompt').value.trim(),scope:'all'})}); $('prompt').value=''; await refresh(); } catch(error) { $('promptError').textContent=error.message; } finally { $('sendPrompt').disabled=false; } };
-document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>showView(button.dataset.view));
-document.querySelectorAll('input[name="launchMode"]').forEach(input=>input.onchange=syncLaunchMode);
+document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>{showView(button.dataset.view);if(button.dataset.view==='accounts') void refreshRam();});
 $('selectAllAccounts').onclick=()=>{ $('accountChoices').querySelectorAll('input').forEach((input,index)=>{input.checked=index<10;}); updateSelectedAccounts(); };
-syncLaunchMode();
-$('accountsToggle').onclick=async()=>{ $('accountManager').hidden=false; await refreshRam(); };
-$('accountsClose').onclick=()=>{ $('accountManager').hidden=true; };
+function updateGameLinkCount(){const count=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean).length;$('gameLinkCount').textContent=`${count} de 10 jogos`;$('gameLinkCount').classList.toggle('over-limit',count>10);}
+$('game').oninput=updateGameLinkCount; updateGameLinkCount();
 $('policyToggle').onclick=async()=>{ $('policyEditor').hidden=!$('policyEditor').hidden; if (!$('policyEditor').hidden) await loadPolicy(); };
 $('policyFile').onchange=async()=>{ const file=$('policyFile').files[0]; if (!file) return; if (file.size>65536) { $('policyMessage').textContent='O arquivo excede 64 KiB.'; return; } $('policyContent').value=await file.text(); $('policyFilename').textContent=file.name; };
 $('policyEditor').onsubmit=async event=>{ event.preventDefault(); const file=$('policyFile').files[0]; const filename=file?.name || ($('policyFilename').textContent.split(' ·')[0] || 'AGENTS.md'); try { const data=await api('/agent-policy',{method:'POST',body:JSON.stringify({filename,content:$('policyContent').value})}); $('policyFilename').textContent=`${data.policy.filename} · salvo globalmente`; $('policyMessage').textContent='Instruções aplicadas a todas as sessões.'; } catch(error) { $('policyMessage').textContent=error.message; } };

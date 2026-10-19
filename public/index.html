@@ -15,43 +15,19 @@
 
     <main id="dashboard">
       <nav class="app-nav" aria-label="Navegação principal">
-        <button type="button" class="nav-button active" data-view="home">＋ Novo jogo</button>
+        <button type="button" class="nav-button active" data-view="accounts">Contas</button>
+        <button type="button" class="nav-button" data-view="group">10 contas <b class="nav-arrow">→</b> 1 jogo</button>
+        <button type="button" class="nav-button" data-view="games">10 contas <b class="nav-arrow">→</b> 10 jogos</button>
         <button type="button" class="nav-button" data-view="sessions">Sessões <span id="navSessionCount">0</span></button>
         <button type="button" class="nav-button" data-view="console">Terminais ao vivo</button>
         <span id="feedState" class="feed-state" role="status">Conectando atualizações…</span>
       </nav>
 
-      <div id="homeView" class="view">
-      <section class="launch card">
-        <div><p class="label">NOVAS SESSÕES</p><h2>Abrir jogos</h2><p class="muted launch-description">Distribua várias contas no mesmo jogo ou cada conta em um jogo diferente.</p><button id="accountsToggle" type="button" class="ghost compact">Gerenciar contas</button></div>
-        <form id="launchForm">
-          <fieldset class="launch-mode" aria-label="Modo de distribuição">
-            <label><input type="radio" name="launchMode" value="group" checked><span><b>Mesmo jogo</b><small>Até 10 contas no mesmo PlaceId</small></span></label>
-            <label><input type="radio" name="launchMode" value="round-robin"><span><b>Jogos diferentes</b><small>Um link para cada conta</small></span></label>
-          </fieldset>
-          <div id="groupLaunchFields" class="launch-fields">
-            <label class="wide">Link do jogo<input id="groupGame" placeholder="https://www.roblox.com/games/123456789"></label>
-            <div class="account-choice-head"><span>Contas para este jogo</span><button id="selectAllAccounts" type="button" class="text-button">Selecionar até 10</button></div>
-            <div id="accountChoices" class="account-choices"></div>
-            <p id="selectedAccountCount" class="selection-count">0 contas selecionadas</p>
-          </div>
-          <div id="roundRobinFields" class="launch-fields" hidden>
-            <label>Começar pela conta<select id="account"></select></label>
-            <label class="wide">Links dos jogos (um por linha)<textarea id="game" rows="4" placeholder="https://www.roblox.com/games/123456789"></textarea></label>
-            <p class="muted wide">Os links serão distribuídos em ordem pelas contas disponíveis.</p>
-          </div>
-          <button id="launchButton" class="launch-submit">Iniciar sessões</button>
-        </form>
-        <p id="launchMessage" class="message"></p>
-        <p id="automationText" class="muted" role="status">Preparando conexão automática…</p>
-      </section>
-
-      <section id="accountManager" class="accounts-panel card" hidden>
+      <div id="accountsView" class="view">
+      <section id="accountManager" class="accounts-panel card">
         <div class="section-title">
-          <div><p class="label">CONTAS LOCAIS</p><h2>Adicionar conta</h2></div>
-          <button id="accountsClose" type="button" class="ghost">Fechar</button>
+          <div><p class="label">CONTAS LOCAIS</p><h2>Adicionar e organizar contas</h2><p class="muted">As sessões ficam criptografadas pelo Windows neste computador.</p></div>
         </div>
-        <p class="muted account-note">As sessões ficam criptografadas pelo Windows neste computador. O Account Manager não precisa ficar aberto.</p>
         <div class="account-grid">
           <form id="syncAccountForm" class="account-form">
             <div><p class="label">JÁ IMPORTADA</p><h3>Sincronizar conta</h3></div>
@@ -67,6 +43,39 @@
           </form>
         </div>
         <p id="accountMessage" class="message"></p>
+      </section>
+      </div>
+
+      <div id="groupView" class="view" hidden>
+      <section class="launch card">
+        <div><p class="label">10 CONTAS · 1 JOGO</p><h2>Equipe no mesmo jogo</h2><p class="muted launch-description">Escolha até 10 contas. Todas entram no mesmo PlaceId com workers e terminais independentes.</p></div>
+        <form id="groupLaunchForm">
+          <div class="launch-fields">
+            <label class="wide">Link do jogo<input id="groupGame" placeholder="https://www.roblox.com/games/123456789" required></label>
+            <div class="account-choice-head"><span>Contas para este jogo</span><button id="selectAllAccounts" type="button" class="text-button">Selecionar até 10</button></div>
+            <div id="accountChoices" class="account-choices"></div>
+            <p id="selectedAccountCount" class="selection-count">0 contas selecionadas</p>
+          </div>
+          <button id="groupLaunchButton" class="launch-submit">Abrir contas no mesmo jogo</button>
+        </form>
+        <p id="groupLaunchMessage" class="message"></p>
+        <p class="automation-status muted" role="status">Preparando conexão automática…</p>
+      </section>
+      </div>
+
+      <div id="gamesView" class="view" hidden>
+      <section class="launch card">
+        <div><p class="label">10 CONTAS · 10 JOGOS</p><h2>Distribuir jogos</h2><p class="muted launch-description">Cole até 10 links. Cada linha será atribuída a uma conta diferente, na mesma ordem.</p></div>
+        <form id="gamesLaunchForm">
+          <div class="launch-fields">
+            <label>Começar pela conta<select id="account" required></select></label>
+            <label class="wide">Links dos jogos (um por linha)<textarea id="game" rows="10" maxlength="4000" placeholder="https://www.roblox.com/games/123456789&#10;https://www.roblox.com/games/987654321" required></textarea></label>
+            <div class="link-count-row"><span id="gameLinkCount">0 de 10 jogos</span><small>Uma conta diferente para cada linha</small></div>
+          </div>
+          <button id="gamesLaunchButton" class="launch-submit">Abrir jogos distribuídos</button>
+        </form>
+        <p id="gamesLaunchMessage" class="message"></p>
+        <p class="automation-status muted" role="status">Preparando conexão automática…</p>
       </section>
       </div>
 

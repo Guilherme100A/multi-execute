@@ -102,9 +102,9 @@ Abra `http://127.0.0.1:3000`. A interface entra diretamente, sem token ou tela d
 
 O mapa interativo da arquitetura fica em `http://127.0.0.1:3000/architecture.html`. Ele detalha visualmente a seleção do cliente pelo Project Real, a injeção do bootstrap, o registro no roblox-mcp-difz e o proxy MCP isolado de cada terminal.
 
-- **Mesmo jogo:** informe uma URL ou PlaceId e marque até 10 contas. O Launcher abre todas no mesmo jogo com workers, conexões MCP e terminais independentes.
-- **Jogos diferentes:** informe um link por linha; o Launcher distribui os jogos pelas contas em round-robin.
-- **Gerenciar contas:** consulte sessões importadas no cofre local ou salve uma nova conta sem editar JSON manualmente.
+- **Contas:** consulte sessões importadas no cofre local ou salve uma nova conta sem editar JSON manualmente.
+- **10 contas → 1 jogo:** informe uma URL ou PlaceId e marque até 10 contas. O Launcher abre todas no mesmo jogo com workers, conexões MCP e terminais independentes.
+- **10 contas → 10 jogos:** informe até 10 links, um por linha; o Launcher distribui cada jogo para uma conta diferente em round-robin.
 - **Sessões:** acompanhe os estados e use retry quando permitido.
 - **Console:** cada sessão possui seu próprio terminal, histórico e campo de prompt. O compositor superior envia o mesmo prompt para todas as sessões conectadas. Estados e respostas chegam por um feed HTTP persistente, sem recarregar a página.
 - **AGENTS.md global:** carregue instruções Markdown aplicadas a todas as sessões.
