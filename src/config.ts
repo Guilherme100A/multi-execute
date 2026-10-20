@@ -55,14 +55,6 @@ export function loadConfig(env = process.env) {
   if (mcpUrl !== 'http://127.0.0.1:28429') throw new Error('MCP_URL must match the loader: http://127.0.0.1:28429');
   const ramPassword = env.RAM_PASSWORD ?? '';
   if (ramPassword && ramPassword.length < 6) throw new Error('RAM_PASSWORD must be empty or at least 6 characters');
-  const browserProxyServer = env.BROWSER_PROXY_SERVER?.trim();
-  let browserProxy: { server: string; username?: string; password?: string } | undefined;
-  if (browserProxyServer) {
-    const proxyUrl = new URL(browserProxyServer.includes('://') ? browserProxyServer : `http://${browserProxyServer}`);
-    if (!['http:', 'https:', 'socks5:'].includes(proxyUrl.protocol) || proxyUrl.username || proxyUrl.password || proxyUrl.pathname !== '/' || proxyUrl.search || proxyUrl.hash)
-      throw new Error('BROWSER_PROXY_SERVER must be an HTTP, HTTPS or SOCKS5 proxy without embedded credentials');
-    browserProxy = { server: proxyUrl.origin, username: env.BROWSER_PROXY_USERNAME, password: env.BROWSER_PROXY_PASSWORD };
-  } else if (env.BROWSER_PROXY_USERNAME || env.BROWSER_PROXY_PASSWORD) throw new Error('BROWSER_PROXY_SERVER is required when browser proxy credentials are configured');
   const accountsFile = fromRoot(dataRoot, env.ACCOUNTS_FILE ?? 'accounts.json');
   const launchBackend = env.LAUNCH_BACKEND ?? 'direct';
   if (!['direct', 'ram'].includes(launchBackend)) throw new Error('LAUNCH_BACKEND must be direct or ram');
@@ -91,6 +83,6 @@ export function loadConfig(env = process.env) {
     maxRetries: integer('MAX_RETRIES', 3, 1, 10),
     retryBaseDelayMs: integer('RETRY_BASE_DELAY_MS', 2_000, 1, 60_000),
     injectionMode: env.INJECTION_MODE === 'mcp-execute' ? 'mcp-execute' as const : 'project-real-autoexec' as const,
-    agentCliCommand, agentModel, claudeCliCommand, browserProxy,
+    agentCliCommand, agentModel, claudeCliCommand,
   };
 }

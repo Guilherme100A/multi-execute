@@ -11,7 +11,7 @@ import { DirectRobloxClient } from './direct-client.js';
 import { AutoConnector, LocalMcpServer, RealConnectionClient, writeBootstrap } from './auto-connect.js';
 import { inspectSetup } from './setup-check.js';
 import { RobloxSettings } from './roblox-settings.js';
-import { RobloxBrowserLogin } from './browser-login.js';
+import { loadRobloxLoginOptions, RobloxBrowserLogin, RobloxLogin } from './roblox-login.js';
 
 export type RunningApplication = {
   url: string;
@@ -27,7 +27,8 @@ export async function startApplication(env = process.env): Promise<RunningApplic
   const direct = new DirectRobloxClient(config.directAccountsFile, undefined, true, config.directHelperFile);
   const launcher = config.launchBackend === 'direct' ? direct : ram;
   const accountRegistry = new AccountRegistry(config.accountsFile, config.accounts);
-  const browserLogin = new RobloxBrowserLogin(undefined, undefined, config.browserProxy);
+  const browserLogin = new RobloxBrowserLogin(undefined, undefined, loadRobloxLoginOptions(env).proxy);
+  const robloxLogin = new RobloxLogin(config.accounts, accountRegistry, launcher, log, browserLogin);
   const pipeline = new Pipeline(store, launcher, mcp, config.accounts, config.authorized, log, Date.now,
     config.healthIntervalMs, config.launchTimeoutMs, config.injectionMode);
   const agent = new AgentRunner(config.agentCliCommand, config.agentModel, `http://${config.host}:${config.port}`,
@@ -40,7 +41,7 @@ export async function startApplication(env = process.env): Promise<RunningApplic
   const expressApp = createApp(pipeline, config.callbackToken, config.autoexecToken, config.findingsDirectory, log,
     agent, config.accounts, accountRegistry, launcher,
     () => automatic?.status ?? { enabled: false, state: 'stopped', error: null }, config.publicDirectory,
-    () => inspectSetup(config, agent.selection.provider, env), new RobloxSettings(config.robloxPreferencesFile, config.robloxSettingsFile), browserLogin);
+    () => inspectSetup(config, agent.selection.provider, env), new RobloxSettings(config.robloxPreferencesFile, config.robloxSettingsFile), robloxLogin);
   let server: Server;
   try {
     server = await new Promise<Server>((resolve, reject) => {

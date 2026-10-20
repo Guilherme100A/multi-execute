@@ -67,6 +67,8 @@ O painel é exclusivamente local e não possui login. Para cadastrar contas, pre
 
 O login preenche somente o username configurado e deixa senha, captcha e 2FA para o operador. Para usar um proxy exclusivamente nessa janela isolada, configure `BROWSER_PROXY_SERVER` e, se necessário, `BROWSER_PROXY_USERNAME`/`BROWSER_PROXY_PASSWORD` no `.env`. O Roblox Player não usa esse proxy.
 
+Toda a lógica de login está centralizada em `src/roblox-login.ts`: abertura do Edge, proxy, preenchimento do username, espera pelo operador, captura da sessão, importação DPAPI e associação ao alias. Esse é o único módulo de backend que precisa ser alterado para personalizar o fluxo.
+
 O arquivo local `accounts.json` segue este formato:
 
 ```json

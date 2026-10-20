@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RobloxBrowserLogin, type LoginBrowser } from '../src/browser-login.js';
+import { RobloxBrowserLogin, type LoginBrowser } from '../src/roblox-login.js';
 
 test('browser login captures only the Roblox session and closes the isolated browser', async () => {
   let checks = 0, closed = false;
