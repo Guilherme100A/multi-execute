@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configurar Multi Execute</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #000; color: #ededed; }
+    * { box-sizing: border-box; }
+    body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 50px 24px 20px; background: #000; }
+    main { width: min(560px, 100%); padding: 24px; border: 1px solid #222; border-radius: 18px; background: #080808; box-shadow: 0 24px 80px #0009; }
+    .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+    .mark { width: 48px; height: 48px; border-radius: 12px; object-fit: contain; flex-shrink: 0; }
+    h1 { margin: 0; font-size: 21px; }
+    p { color: #999; line-height: 1.55; }
+    label { display: block; margin: 18px 0 9px; font-weight: 700; }
+    textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid #333; border-radius: 12px; padding: 14px; color: #fff; background: #000; font: 15px/1.6 ui-monospace, Consolas, monospace; outline: none; }
+    textarea:focus { border-color: #777; box-shadow: 0 0 0 3px #ffffff0a; }
+    .hint { margin: 9px 0 0; font-size: 13px; }
+    .error { display: none; margin-top: 18px; padding: 12px 14px; border: 1px solid #000; border-radius: 10px; background: #181818; color: #ccc; white-space: pre-wrap; }
+    footer { display: flex; justify-content: flex-end; align-items: center; gap: 14px; margin-top: 18px; }
+    button { border: 0; border-radius: 11px; padding: 12px 20px; background: #f5f7fb; color: #080a0e; font-weight: 800; cursor: pointer; }
+    button:disabled { opacity: .55; cursor: wait; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><img class="mark" src="../public/assets/terminal-roblox/roblox-04.png" alt="" width="48" height="48"><div><h1>Configuração do Multi Execute</h1><p style="margin:4px 0 0">Defina os jogos autorizados para os seus testes.</p></div></div>
+    <p>Informe somente PlaceIds de jogos próprios ou para os quais você possui autorização explícita. Você poderá alterar esta lista depois em Configurações.</p>
+    <label for="places">PlaceIds autorizados</label>
+    <textarea id="places" autofocus spellcheck="false" placeholder="1234567890&#10;9876543210"></textarea>
+    <p class="hint">Um ID por linha ou separados por vírgula. Cada ID deve ter entre 6 e 15 dígitos.</p>
+    <div class="error" id="error" role="alert"></div>
+    <footer><button id="save">Salvar e abrir o app</button></footer>
+  </main>
+  <script>
+    const field = document.querySelector('#places');
+    const error = document.querySelector('#error');
+    const button = document.querySelector('#save');
+    const showError = message => { error.textContent = message; error.style.display = message ? 'block' : 'none'; };
+    window.multiExecute.settings().then(settings => {
+      field.value = settings.authorizedPlaceIds.join('\n');
+      if (settings.error) showError(settings.error);
+    });
+    button.addEventListener('click', async () => {
+      const ids = field.value.split(/[\s,;]+/).map(value => value.trim()).filter(Boolean);
+      showError(''); button.disabled = true; button.textContent = 'Iniciando…';
+      const result = await window.multiExecute.saveSettings(ids);
+      if (!result.ok) { showError(result.error || 'Não foi possível iniciar o aplicativo.'); button.disabled = false; button.textContent = 'Salvar e abrir o app'; }
+    });
+  </script>
+</body>
+</html>

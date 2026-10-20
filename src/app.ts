@@ -10,13 +10,17 @@ import type { AgentRunner } from './agent.js';
 import type { Account } from './validation.js';
 import type { AccountRegistry } from './account-registry.js';
 import type { RamClient } from './clients.js';
+import type { SetupReport } from './setup-check.js';
+import type { RobloxSettings } from './roblox-settings.js';
 
 export function createApp(pipeline: Pipeline, callbackToken: string, autoexecToken: string,
   findings: string, log: Logger, agent?: AgentRunner, accounts: Account[] = [], accountRegistry?: AccountRegistry,
-  localAccounts?: Pick<RamClient, 'accounts' | 'importCookie'>, automation = () => ({ enabled: false, state: 'stopped', error: null as string | null })) {
+  localAccounts?: Pick<RamClient, 'accounts' | 'importCookie'>, automation = () => ({ enabled: false, state: 'stopped', error: null as string | null }),
+  publicDirectory = resolve('public'), setupCheck?: () => Promise<SetupReport>, robloxSettings?: RobloxSettings) {
   const app = express();
+  const activePrompts = new Map<AbortController, Promise<void>>();
   app.disable('x-powered-by');
-  app.use(express.static(resolve('public'), { index: 'index.html', fallthrough: true }));
+  app.use(express.static(publicDirectory, { index: 'index.html', fallthrough: true }));
   app.use((req, res, next) => {
     if (!req.path.startsWith('/internal/')) { next(); return; }
     const supplied = Buffer.from(req.headers.authorization ?? '');
@@ -26,6 +30,30 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
     next();
   });
   app.use(express.json({ limit: '1mb' }));
+  app.get('/roblox-settings', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!robloxSettings) { res.status(503).json({ error: 'Configurações indisponíveis nesta execução.' }); return; }
+    res.json(await robloxSettings.snapshot());
+  });
+  app.post('/roblox-settings', async (req, res) => {
+    if (!robloxSettings) { res.status(503).json({ error: 'Configurações indisponíveis nesta execução.' }); return; }
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${req.headers.host}`) { res.status(403).json({ error: 'Invalid origin' }); return; }
+    res.json({ preferences: await robloxSettings.save(req.body) });
+  });
+  app.post('/roblox-settings/apply', async (req, res) => {
+    if (!robloxSettings) { res.status(503).json({ error: 'Configurações indisponíveis nesta execução.' }); return; }
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${req.headers.host}`) { res.status(403).json({ error: 'Invalid origin' }); return; }
+    await robloxSettings.apply();
+    log.info('roblox_preferences_applied');
+    res.json({ applied: true, backup: true });
+  });
+  app.get('/setup-check', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!setupCheck) { res.status(503).json({ error: 'Verificação de requisitos indisponível nesta execução.' }); return; }
+    res.json(await setupCheck());
+  });
   app.get('/config', (_req, res) => res.json({
     accounts: accounts.map(account => ({ alias: account.alias, username: account.robloxUsername })),
     agent: { configured: agent?.configured ?? false, model: agent?.model ?? null, provider: agent?.selection?.provider === 'claude' ? 'Claude Code' : 'Codex CLI', selection:agent?.selection, providers:agent?.providers?.() },
@@ -128,8 +156,9 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
     if (targets.some(session => busy.has(session.worker_id))) throw new ConflictError('One or more target terminals are already running a prompt');
     const selection=agent.selection ?? {provider:'codex' as const,model:agent.model};
     const runs = targets.map(session => pipeline.store.createPrompt(session, prompt.trim(),selection));
-    for (const run of runs) void (async () => {
+    for (const run of runs) {
       const controller = new AbortController();
+      const task = (async () => {
       const connectionCheck = setInterval(() => {
         const session = pipeline.store.get(run.session_id);
         if (!pipeline.online || !session || !['connected', 'analyzing'].includes(session.status)) controller.abort();
@@ -145,7 +174,10 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
       } catch (error) {
         pipeline.store.updatePrompt(run.id, 'failed', null, error instanceof Error ? error.message : String(error));
       } finally { clearInterval(connectionCheck); }
-    })();
+      })();
+      activePrompts.set(controller, task);
+      void task.finally(() => activePrompts.delete(controller));
+    }
     res.status(202).json({ runs });
   });
   app.post('/launch', (req, res) => {
@@ -206,5 +238,10 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
     res.status(code).json({ error: code === 500 ? 'Internal server error' : error instanceof Error ? error.message : String(error) });
   };
   app.use(errors);
-  return app;
+  return Object.assign(app, {
+    async shutdown(): Promise<void> {
+      for (const controller of activePrompts.keys()) controller.abort();
+      await Promise.allSettled(activePrompts.values());
+    },
+  });
 }

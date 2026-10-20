@@ -156,8 +156,7 @@ export class AutoConnector {
   }
 }
 
-export function writeBootstrap(origin: string, token: string): string {
-  const file = resolve('project-real-autoexec.lua');
+export function writeBootstrap(origin: string, token: string, file = resolve('project-real-autoexec.lua')): string {
   writeFileSync(file, makeProjectRealAutoexec(origin, token), { mode: 0o600 });
   return file;
 }

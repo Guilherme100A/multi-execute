@@ -5,6 +5,9 @@ import { randomBytes } from 'node:crypto';
 import { parseAccounts, placeId } from './validation.js';
 
 export function loadConfig(env = process.env) {
+  const resourceRoot = resolve(env.APP_RESOURCE_ROOT ?? process.cwd());
+  const dataRoot = resolve(env.APP_DATA_ROOT ?? process.cwd());
+  const fromRoot = (root: string, value: string) => resolve(root, value);
   const callbackToken = env.INTERNAL_CALLBACK_TOKEN ?? randomBytes(32).toString('hex');
   const autoexecToken = env.AUTOEXEC_TOKEN ?? randomBytes(32).toString('hex');
   const invalidSecret = (value: string) => value.length < 24 || /^replace-with-/i.test(value);
@@ -38,7 +41,7 @@ export function loadConfig(env = process.env) {
   if (mcpUrl !== 'http://127.0.0.1:28429') throw new Error('MCP_URL must match the loader: http://127.0.0.1:28429');
   const ramPassword = env.RAM_PASSWORD ?? '';
   if (ramPassword && ramPassword.length < 6) throw new Error('RAM_PASSWORD must be empty or at least 6 characters');
-  const accountsFile = resolve(env.ACCOUNTS_FILE ?? 'accounts.json');
+  const accountsFile = fromRoot(dataRoot, env.ACCOUNTS_FILE ?? 'accounts.json');
   const launchBackend = env.LAUNCH_BACKEND ?? 'direct';
   if (!['direct', 'ram'].includes(launchBackend)) throw new Error('LAUNCH_BACKEND must be direct or ram');
   const agentCliCommand = env.AGENT_CLI_COMMAND ?? (process.platform === 'win32' ? 'codex.cmd' : 'codex');
@@ -50,12 +53,17 @@ export function loadConfig(env = process.env) {
   return {
     host, port, callbackToken, autoexecToken, authorized, mcpUrl, ramUrl: upstream('RAM_URL', `http://127.0.0.1:${ramPort}`),
     ramPassword, mcpToken: env.MCP_TOKEN ?? '',
-    launchBackend, directAccountsFile: resolve(env.DIRECT_ACCOUNTS_FILE ?? 'data/roblox-accounts.dpapi'),
+    launchBackend, directAccountsFile: fromRoot(dataRoot, env.DIRECT_ACCOUNTS_FILE ?? 'data/roblox-accounts.dpapi'),
+    directHelperFile: resolve(env.DIRECT_HELPER_FILE ?? fromRoot(resourceRoot, 'scripts/direct-roblox.ps1')),
+    publicDirectory: resolve(env.PUBLIC_DIRECTORY ?? fromRoot(resourceRoot, 'public')),
+    bootstrapFile: resolve(env.BOOTSTRAP_FILE ?? fromRoot(dataRoot, 'project-real-autoexec.lua')),
+    robloxPreferencesFile: fromRoot(dataRoot, 'roblox-settings.json'),
+    robloxSettingsFile: resolve(env.ROBLOX_SETTINGS_FILE ?? resolve(env.LOCALAPPDATA ?? resolve(homedir(), 'AppData/Local'), 'Roblox/GlobalBasicSettings_13.xml')),
     autoConnect: env.AUTO_CONNECT !== 'false',
     realMcpExecutable: resolve(env.REAL_MCP_EXECUTABLE ?? resolve(env.LOCALAPPDATA ?? resolve(homedir(), 'AppData/Local'), 'Real/data/mcp/real-mcp.exe')),
     accountsFile, accounts: parseAccounts(JSON.parse(readFileSync(accountsFile, 'utf8')) as unknown),
-    databaseFile: resolve(env.DB_PATH ?? env.DATABASE_FILE ?? 'data/sessions.sqlite'),
-    logDirectory: resolve(env.LOG_DIRECTORY ?? 'logs'), findingsDirectory: resolve(env.FINDINGS_DIRECTORY ?? 'findings'),
+    databaseFile: fromRoot(dataRoot, env.DB_PATH ?? env.DATABASE_FILE ?? 'data/sessions.sqlite'),
+    logDirectory: fromRoot(dataRoot, env.LOG_DIRECTORY ?? 'logs'), findingsDirectory: fromRoot(dataRoot, env.FINDINGS_DIRECTORY ?? 'findings'),
     healthIntervalMs: integer('HEALTH_CHECK_INTERVAL_MS', 3_000, 1_000, 3_600_000),
     launchTimeoutMs: integer('LAUNCH_TIMEOUT_MS', 120_000, 10_000, 3_600_000),
     maxRetries: integer('MAX_RETRIES', 3, 1, 10),

@@ -10,6 +10,15 @@ let lastSnapshot = null;
 let agentProviders=[];
 let currentAgent=null;
 let launchAccounts=[];
+let checkingSetup = false;
+let robloxPreferences = {hideImages:false,maxRecentGames:8};
+let robloxSettingsLoaded = false;
+let loadingRobloxSettings = false;
+let robloxRecentSignature = '';
+let policyLoaded = false;
+let policyLoading = false;
+let policyDirty = false;
+let policyFileName = 'AGENTS.md';
 const liveStatuses = new Set(['connected', 'analyzing']);
 const labels = {connected:'Conectada', analyzing:'Analisando', pending:'Na fila', launching:'Conectando', failed:'Falhou', disconnected:'Desconectada', done:'Concluída'};
 const groupModeLabels = {'same-game':'Multi-instância · Um jogo','multi-game':'Multi-instância · Vários jogos',single:'Sessão individual'};
@@ -27,8 +36,116 @@ function setFeedConnected(connected) {
 }
 
 function showView(name) {
-  for (const view of ['accounts','group','games','sessions','console']) $(`${view}View`).hidden = view !== name;
+  for (const view of ['accounts','group','games','sessions','console','setup','roblox','agents']) $(`${view}View`).hidden = view !== name;
   document.querySelectorAll('.nav-button').forEach(button => button.classList.toggle('active', button.dataset.view === name));
+  if (name === 'setup') void checkSetup();
+  if (name === 'roblox' && !robloxSettingsLoaded) void loadRobloxSettings();
+  if (name === 'agents' && !policyLoaded) void loadPolicy().catch(error => { $('policyMessage').textContent=error.message; });
+}
+
+function fillRobloxSettings(preferences) {
+  const setOption = (id, value) => {
+    const field = $(id); const text = value === null ? '' : String(value);
+    if (text && ![...field.options].some(option => option.value === text)) field.add(new Option(text, text));
+    field.value = text;
+  };
+  setOption('rbFps', preferences.fpsCap); setOption('rbQuality', preferences.graphicsQuality);
+  setOption('rbVolume', preferences.masterVolume); setOption('rbFullscreen', preferences.fullscreen);
+  $('rbHideImages').checked = preferences.hideImages; $('rbRecentLimit').value = preferences.maxRecentGames;
+}
+
+function useRobloxPreferences(preferences) {
+  robloxPreferences = preferences;
+  document.documentElement.classList.toggle('hide-interface-images', preferences.hideImages);
+  if (lastSnapshot) renderRecentRobloxGames(lastSnapshot[0].sessions);
+}
+
+async function loadRobloxSettings() {
+  if (loadingRobloxSettings) return;
+  loadingRobloxSettings = true;
+  try {
+    const data = await api('/roblox-settings');
+    useRobloxPreferences(data.preferences); fillRobloxSettings(data.preferences); robloxSettingsLoaded = true;
+    const value = data.client.values;
+    $('robloxNativeStatus').textContent = data.client.available
+      ? `Atual no Roblox: FPS ${value.fpsCap === -1 ? 'automático' : value.fpsCap ?? '—'} · volume ${value.masterVolume ?? '—'}% · ${value.fullscreen ? 'tela cheia' : 'janela'}.`
+      : data.client.error;
+    $('robloxApply').disabled = !data.client.available;
+  } catch (error) { $('robloxNativeStatus').textContent = error.message; $('robloxApply').disabled = true; }
+  finally { loadingRobloxSettings = false; }
+}
+
+function collectRobloxPreferences() {
+  const number = id => $(id).value === '' ? null : Number($(id).value);
+  return {fpsCap:number('rbFps'),masterVolume:number('rbVolume'),graphicsQuality:number('rbQuality'),
+    fullscreen:$('rbFullscreen').value === '' ? null : $('rbFullscreen').value === 'true',
+    hideImages:$('rbHideImages').checked,maxRecentGames:Number($('rbRecentLimit').value)};
+}
+
+async function saveRobloxSettings(apply = false) {
+  const buttons = [$('robloxSave'), $('robloxApply')]; const previous = buttons.map(button => button.disabled);
+  buttons.forEach(button => { button.disabled = true; }); $('robloxSettingsMessage').textContent = 'Salvando…';
+  try {
+    const data = await api('/roblox-settings', {method:'POST',body:JSON.stringify(collectRobloxPreferences())});
+    useRobloxPreferences(data.preferences);
+    if (apply) {
+      await api('/roblox-settings/apply', {method:'POST',body:'{}'});
+      $('robloxSettingsMessage').textContent = 'Configurações aplicadas no Roblox com backup. Abra o jogo para usar.';
+      await loadRobloxSettings();
+    } else $('robloxSettingsMessage').textContent = 'Preferências salvas. As opções do Roblox só mudam ao aplicar.';
+  } catch (error) { $('robloxSettingsMessage').textContent = error.message; }
+  finally { buttons.forEach((button,index) => { button.disabled = previous[index]; }); }
+}
+
+function renderRecentRobloxGames(sessions) {
+  const recent = [...sessions].sort((a,b)=>b.created_at-a.created_at);
+  const ids = [...new Set(recent.map(session=>session.place_id))].slice(0,robloxPreferences.maxRecentGames);
+  const signature = ids.join(','); if (signature === robloxRecentSignature) return; robloxRecentSignature = signature;
+  if (!ids.length) { $('robloxRecentGames').textContent = 'Nenhum jogo no histórico.'; return; }
+  $('robloxRecentGames').replaceChildren(...ids.map(id => {
+    const button = document.createElement('button'); button.type='button'; button.className='ghost'; button.textContent=`Place ${id}`;
+    button.onclick=()=>{ $('groupGame').value=id; showView('group'); $('groupGame').focus(); }; return button;
+  }));
+}
+
+async function checkSetup() {
+  if (checkingSetup) return;
+  checkingSetup = true;
+  const button = $('setupCheckButton');
+  button.disabled = true; button.classList.add('is-checking');
+  button.querySelector('span').textContent = 'Verificando…';
+  $('setupItems').setAttribute('aria-busy', 'true');
+  $('setupSummaryTitle').textContent = 'Conferindo os requisitos…';
+  try {
+    const report = await api('/setup-check');
+    const labels = {ok:'Encontrado', missing:'Não encontrado', attention:'Configurar', optional:'Opcional'};
+    const symbols = {ok:'✓', missing:'×', attention:'!', optional:'−'};
+    const rows = report.items.map((item, index) => {
+      const row = document.createElement('div'); row.className = `setup-item setup-${item.status}`;
+      row.style.setProperty('--setup-order', Math.min(index, 8));
+      const icon = document.createElement('span'); icon.className = 'setup-item-symbol'; icon.textContent = symbols[item.status]; icon.setAttribute('aria-hidden', 'true');
+      const content = document.createElement('div'); content.className = 'setup-item-content';
+      const title = document.createElement('strong'); title.textContent = item.label;
+      const detail = document.createElement('p'); detail.textContent = item.detail; content.append(title, detail);
+      const status = document.createElement('span'); status.className = 'setup-item-status'; status.textContent = labels[item.status];
+      row.append(icon, content, status); return row;
+    });
+    $('setupItems').replaceChildren(...rows);
+    $('setupSummary').classList.toggle('is-ready', report.ready);
+    $('setupSummary').querySelector('.setup-summary-symbol').textContent = report.ready ? '✓' : '!';
+    $('setupSummaryTitle').textContent = report.ready ? 'Tudo encontrado' : 'Seu setup precisa de alguns ajustes';
+    $('setupSummaryText').textContent = `${report.passed} de ${report.total} requisitos obrigatórios encontrados. Confira os detalhes abaixo.`;
+    $('setupCheckedAt').textContent = `Última verificação às ${new Date(report.checkedAt).toLocaleTimeString('pt-BR')}`;
+  } catch (error) {
+    $('setupSummary').classList.remove('is-ready');
+    $('setupSummaryTitle').textContent = 'Não foi possível verificar agora';
+    $('setupSummaryText').textContent = error.message;
+    $('setupCheckedAt').textContent = 'Tente verificar novamente.';
+  } finally {
+    checkingSetup = false; button.disabled = false; button.classList.remove('is-checking');
+    button.querySelector('span').textContent = 'Verificar novamente';
+    $('setupItems').setAttribute('aria-busy', 'false');
+  }
 }
 
 async function api(path, options = {}) {
@@ -40,6 +157,7 @@ async function api(path, options = {}) {
 
 async function connect() {
   const config = await loadConfig();
+  void loadRobloxSettings();
   $('model').textContent = config.agent.configured ? `${config.agent.provider} · ${config.agent.model}` : 'CLI NÃO CONFIGURADA';
   await refresh();
   await refreshRam();
@@ -55,6 +173,9 @@ async function loadConfig() {
   $('agentProvider').value=currentAgent.provider;
   renderModelOptions(currentAgent.model);
   $('model').textContent=`${config.agent.provider} · ${config.agent.model}`;
+  $('activeAgentProvider').textContent=config.agent.provider || 'Nenhum agente';
+  $('activeAgentModel').textContent=config.agent.model || 'Nenhum modelo';
+  $('agentAvailability').textContent=config.agent.configured ? 'CLI disponível neste computador' : 'Instale e autentique a CLI para usar os terminais';
   launchAccounts=config.accounts;
   $('account').replaceChildren(...config.accounts.map(row => new Option(`${row.alias} (${row.username})`, row.alias)));
   renderAccountChoices();
@@ -100,7 +221,7 @@ $('agentSettingsForm').onsubmit=async event=>{
     await api('/agent-settings',{method:'POST',body:JSON.stringify({provider:$('agentProvider').value,model:$('agentModel').value==='custom'?$('customModel').value.trim():$('agentModel').value})});
     await loadConfig(); if(lastSnapshot) applySnapshot(...lastSnapshot);
     $('agentSettingsMessage').textContent='Escolha salva. Os próximos prompts usarão esta CLI e este modelo.';
-  } catch(error) {$('agentSettingsMessage').textContent=error.message;} finally {$('saveAgentSettings').disabled=false;}
+  } catch(error) {$('agentSettingsMessage').textContent=error.message;} finally {$('saveAgentSettings').disabled=!agentProviders.find(row=>row.id===$('agentProvider').value)?.installed;}
 };
 
 async function refreshRam() {
@@ -113,9 +234,17 @@ async function refreshRam() {
 }
 
 async function loadPolicy() {
-  const data = await api('/agent-policy');
-  $('policyFilename').textContent = data.policy ? `${data.policy.filename} · salvo globalmente` : 'Nenhum arquivo salvo';
-  $('policyContent').value = data.policy?.content || '';
+  if (policyLoading) return;
+  policyLoading = true;
+  try {
+    const data = await api('/agent-policy');
+    if (!policyDirty) {
+      policyFileName = data.policy?.filename || 'AGENTS.md';
+      $('policyFilename').textContent = data.policy ? `${data.policy.filename} · salvo para as sessões` : 'Nenhum arquivo salvo';
+      $('policyContent').value = data.policy?.content || '';
+    }
+    policyLoaded = true;
+  } finally { policyLoading = false; }
 }
 
 function sessionCard(row) {
@@ -278,6 +407,7 @@ function renderBatchTerminal(sessions, runs) {
 
 function applySnapshot(status, prompts) {
   lastSnapshot=[status,prompts];
+  renderRecentRobloxGames(status.sessions);
   const live=status.mcp_online && feedConnected ? status.sessions.filter(row=>liveStatuses.has(row.status)) : [];
   const pending=status.sessions.filter(row=>['pending','launching'].includes(row.status));
   const history=status.sessions.filter(row=>!liveStatuses.has(row.status) && !['pending','launching'].includes(row.status)).reverse();
@@ -385,10 +515,56 @@ document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>{sho
 $('selectAllAccounts').onclick=()=>{ $('accountChoices').querySelectorAll('input').forEach((input,index)=>{input.checked=index<10;}); updateSelectedAccounts(); };
 function updateGameLinkCount(){const count=$('game').value.split(/\r?\n/).map(value=>value.trim()).filter(Boolean).length;$('gameLinkCount').textContent=`${count} de 10 jogos`;$('gameLinkCount').classList.toggle('over-limit',count>10);}
 $('game').oninput=updateGameLinkCount; updateGameLinkCount();
-$('policyToggle').onclick=async()=>{ $('policyEditor').hidden=!$('policyEditor').hidden; if (!$('policyEditor').hidden) await loadPolicy(); };
-$('policyFile').onchange=async()=>{ const file=$('policyFile').files[0]; if (!file) return; if (file.size>65536) { $('policyMessage').textContent='O arquivo excede 64 KiB.'; return; } $('policyContent').value=await file.text(); $('policyFilename').textContent=file.name; };
-$('policyEditor').onsubmit=async event=>{ event.preventDefault(); const file=$('policyFile').files[0]; const filename=file?.name || ($('policyFilename').textContent.split(' ·')[0] || 'AGENTS.md'); try { const data=await api('/agent-policy',{method:'POST',body:JSON.stringify({filename,content:$('policyContent').value})}); $('policyFilename').textContent=`${data.policy.filename} · salvo globalmente`; $('policyMessage').textContent='Instruções aplicadas a todas as sessões.'; } catch(error) { $('policyMessage').textContent=error.message; } };
+$('policyToggle').onclick=()=>{ showView('agents'); };
+$('policyContent').oninput=()=>{ policyDirty=true; $('policyMessage').textContent='Alterações ainda não salvas.'; };
+$('policyFile').onchange=async()=>{
+  const file=$('policyFile').files[0]; if (!file) return;
+  if (file.size>65536) { $('policyMessage').textContent='O arquivo excede 64 KiB.'; return; }
+  try {
+    const content=await file.text(); policyDirty=true; policyFileName=file.name;
+    $('policyContent').value=content; $('policyFilename').textContent=file.name;
+    $('policyMessage').textContent='Arquivo carregado. Clique em Salvar AGENTS.md para usar nas sessões.';
+  } catch(error) { $('policyMessage').textContent=error.message; }
+};
+$('policyEditor').onsubmit=async event=>{
+  event.preventDefault(); $('saveAgentPolicy').disabled=true;
+  const content=$('policyContent').value;
+  try {
+    const data=await api('/agent-policy',{method:'POST',body:JSON.stringify({filename:policyFileName,content})});
+    $('policyFilename').textContent=`${data.policy.filename} · salvo para as sessões`;
+    policyLoaded=true; policyDirty=$('policyContent').value!==content;
+    $('policyMessage').textContent=policyDirty ? 'Instruções salvas. Há novas alterações ainda não salvas.' : 'AGENTS.md salvo. Os próximos prompts de todas as sessões usarão estas instruções.';
+  } catch(error) { $('policyMessage').textContent=error.message; }
+  finally { $('saveAgentPolicy').disabled=false; }
+};
 $('syncAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent=''; try { await api('/accounts/sync',{method:'POST',body:JSON.stringify({alias:$('syncAlias').value.trim(),username:$('ramAccount').value})}); $('syncAlias').value=''; await loadConfig(); $('accountMessage').textContent='Conta adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
 $('importAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent='Salvando a sessão criptografada…'; const cookie=$('securityCookie').value; $('securityCookie').value=''; try { await api('/accounts/import',{method:'POST',body:JSON.stringify({alias:$('importAlias').value.trim(),cookie})}); $('importAlias').value=''; await loadConfig(); await refreshRam(); $('accountMessage').textContent='Conta protegida pelo Windows e adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
+$('robloxSettingsForm').onsubmit = event => { event.preventDefault(); void saveRobloxSettings(); };
+$('robloxApply').onclick = () => { void saveRobloxSettings(true); };
+$('robloxRamImport').onchange = async () => {
+  const file = $('robloxRamImport').files?.[0]; if (!file) return;
+  try {
+    if (file.size > 64 * 1024) throw new Error('O arquivo INI deve ter até 64 KiB.');
+    const general = {}; let section = '';
+    for (const raw of (await file.text()).split(/\r?\n/)) {
+      const line = raw.trim(); if (!line || /^[;#]/.test(line)) continue;
+      const header = /^\[([^\]]+)\]/.exec(line); if (header) { section = header[1].toLowerCase(); continue; }
+      if (section !== 'general') continue;
+      const pair = /^([^=]+)=(.*)$/.exec(line); if (!pair) continue;
+      const key = pair[1].trim().toLowerCase();
+      if (['unlockfps','maxfpsvalue','disableimages','maxrecentgames'].includes(key)) general[key] = pair[2].split(/[;#]/)[0].trim();
+    }
+    const next = collectRobloxPreferences(); let imported = 0;
+    const boolean = value => { if (!/^(true|false)$/i.test(value)) throw new Error('Valor inválido no INI.'); return value.toLowerCase() === 'true'; };
+    if ('unlockfps' in general) { next.fpsCap = boolean(general.unlockfps) ? Number(general.maxfpsvalue ?? 120) : null; imported++; }
+    if (next.fpsCap !== null && (!Number.isInteger(next.fpsCap) || next.fpsCap < 30 || next.fpsCap > 480)) throw new Error('O limite de FPS importado deve ficar entre 30 e 480.');
+    if ('disableimages' in general) { next.hideImages = boolean(general.disableimages); imported++; }
+    if ('maxrecentgames' in general) { next.maxRecentGames = Number(general.maxrecentgames); if (!Number.isInteger(next.maxRecentGames) || next.maxRecentGames < 1 || next.maxRecentGames > 50) throw new Error('O limite de jogos recentes deve ficar entre 1 e 50.'); imported++; }
+    if (!imported) throw new Error('Nenhuma opção compatível foi encontrada na seção General.');
+    fillRobloxSettings(next); $('robloxImportMessage').textContent = `${imported} opção(ões) carregada(s). Revise e clique em Salvar preferências.`;
+  } catch (error) { $('robloxImportMessage').textContent = error.message; }
+  finally { $('robloxRamImport').value = ''; }
+};
+$('setupCheckButton').onclick = () => { void checkSetup(); };
 connect().catch(showFatal);
 document.addEventListener('visibilitychange',()=>{ if (!document.hidden && !$('dashboard').hidden && !feedConnected) startLiveFeed(); });

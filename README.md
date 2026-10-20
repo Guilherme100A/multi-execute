@@ -1,5 +1,34 @@
 # Roblox Security Pipeline
 
+## Aplicativo Windows
+
+O projeto também pode ser executado em uma janela desktop, com Node.js e a interface incluídos no pacote. Para uso local, abra `release/Multi-Execute-1.0.0-Setup.exe` e siga o instalador, ou execute `release/Multi-Execute-1.0.0-Portable.exe` sem instalar.
+
+Na primeira abertura, informe os PlaceIds dos seus jogos autorizados. O botão **Configurações** na barra superior permite alterar a lista depois. As contas podem ser adicionadas pelo painel. O aplicativo abre em tamanho médio, com barra preta integrada e cantos arredondados no Windows 11. Fechar o aplicativo encerra o servidor local.
+
+Os pacotes não incluem contas, cookies, `.env`, banco ou logs deste repositório. Os dados do app são gravados em `%APPDATA%/Multi Execute`. A versão portátil também usa essa pasta para preservar os dados entre atualizações. A variável opcional `MULTI_EXECUTE_DATA_DIR` permite escolher outra pasta de dados. Roblox, Project Real e a CLI de IA escolhida continuam sendo instalados e autenticados separadamente.
+
+Erros de abertura e encerramento ficam registrados em `%APPDATA%/Multi Execute/logs/desktop.jsonl`, mesmo depois de fechar a mensagem de erro. Esse registro não captura conteúdo de formulários ou mensagens do console da página.
+
+A aba **Setup** na lateral confere os requisitos locais e mostra o que foi encontrado, o que falta configurar e quais itens são opcionais. **Verificar novamente** refaz a checagem sem reiniciar o aplicativo. Essa checagem não executa jogos nem valida sessões ou login das CLIs.
+
+A aba **Agentes** reúne a escolha entre as CLIs disponíveis, o modelo (incluindo um ID personalizado) e o editor do `AGENTS.md`. É possível importar um arquivo Markdown ou escrever as instruções diretamente. Agente, modelo e instruções ficam salvos e são usados nos próximos prompts de todas as sessões. Execuções em andamento mantêm a configuração original; navegar entre abas preserva o rascunho das instruções.
+
+A aba **Configurações Roblox** salva preferências de FPS, qualidade, volume, tela cheia, imagens do painel e jogos recentes. **Salvar preferências** mantém as escolhas no app; **Salvar e aplicar no Roblox** atualiza somente os campos selecionados no `GlobalBasicSettings_13.xml`, exige que o Roblox esteja fechado e cria um backup `.multi-execute.bak`. Essas configurações são globais para o usuário do Windows, não por conta ou sessão. Os testes usam arquivos temporários e não alteram a configuração real do Roblox.
+
+O importador de `RAMSettings.ini` lê somente `UnlockFPS`, `MaxFPSValue`, `DisableImages` e `MaxRecentGames` da seção `General`, inspirado nas [opções do Account Manager](https://github.com/ic3w0lf22/Roblox-Account-Manager/blob/master/RBX%20Alt%20Manager/Forms/SettingsForm.cs). A importação preenche a tela para revisão; não transfere cookies, senhas, FastFlags arbitrárias nem configurações de acesso. O limite de FPS usa a configuração nativa do Roblox em vez da FastFlag antiga do RAM.
+
+Para desenvolver, testar ou gerar os pacotes:
+
+```powershell
+npm ci
+npm run desktop
+npm run test:desktop
+npm run package:win
+```
+
+`npm run package:win` gera o instalador e o portátil na pasta `release/`, ignorada pelo Git. O teste desktop usa dados temporários e não abre jogos. `npm start` continua disponível para executar o painel no navegador. O ícone usado no pacote pode ser regenerado com `powershell -NoProfile -File scripts/build-icon.ps1`.
+
 Launcher local em Express/TypeScript para abrir o Roblox diretamente com contas locais, carregar o [roblox-mcp-difz](https://github.com/Difz25x/roblox-mcp-difz) pelo Auto Execute do Project Real e conduzir análises autorizadas. O Account Manager pode fornecer as contas na importação inicial; não precisa estar instalado ou aberto depois dela.
 
 Use somente em jogos próprios ou com autorização explícita. `AUTHORIZED_PLACE_IDS` é uma allowlist obrigatória; o Launcher não consulta propriedade no Roblox.

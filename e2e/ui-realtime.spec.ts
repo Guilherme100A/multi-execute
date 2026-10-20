@@ -9,6 +9,7 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
   let stream: ServerResponse | undefined;
   let connections=0;
   let choice={provider:'codex',model:'test'};
+  let agentPolicy: {filename:string;content:string} | null = null;
   let groupLaunch: {link:string;aliases:string[]} | undefined;
   const server=createServer((req,res)=>{
     const path=req.url!;
@@ -16,6 +17,11 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
       connections++; stream=res; res.writeHead(200,{'content-type':'text/event-stream'}); res.write(`data: ${JSON.stringify(snapshot)}\n\n`); return;
     }
     if (path==='/agent-settings') { let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{choice=JSON.parse(body);res.setHeader('content-type','application/json');res.end(JSON.stringify({selection:choice}));});return; }
+    if (path==='/agent-policy') {
+      if (req.method === 'POST') { let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{agentPolicy=JSON.parse(body);res.setHeader('content-type','application/json');res.end(JSON.stringify({policy:agentPolicy}));}); }
+      else {res.setHeader('content-type','application/json');res.end(JSON.stringify({policy:agentPolicy}));}
+      return;
+    }
     if (path==='/config') { res.setHeader('content-type','application/json'); res.end(JSON.stringify({accounts:['alpha','beta','gamma'].map(alias=>({alias,username:alias})),agent:{configured:true,provider:choice.provider==='claude'?'Claude Code':'Codex CLI',model:choice.model,selection:choice,providers:[{id:'codex',label:'Codex CLI',installed:true,models:[{id:'test',label:'Test model'}]},{id:'claude',label:'Claude Code',installed:true,models:[{id:'sonnet',label:'Sonnet'},{id:'opus',label:'Opus'}]}]}})); return; }
     if (path==='/launch-group') { let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{groupLaunch=JSON.parse(body);res.statusCode=202;res.setHeader('content-type','application/json');res.end(JSON.stringify({sessions:groupLaunch!.aliases.map(alias=>({session:{id:alias,group_id:'same-game-group'}}))}));});return; }
     if (path==='/status' || path==='/prompts') { res.setHeader('content-type','application/json'); res.end(JSON.stringify(path==='/status'?snapshot:{runs:snapshot.runs})); return; }
@@ -69,12 +75,23 @@ test('live updates preserve drafts, focus and scroll; disconnected games leave t
     await expect(page.locator('#feedState')).toContainText('ao vivo');
     await expect(input).toBeEnabled(); await expect(input).toHaveValue('Meu rascunho ainda não enviado');
     expect(navigations).toBe(1); expect(errors).toEqual([]);
+    await page.locator('[data-view="agents"]').click();
+    await expect(page.locator('#activeAgentProvider')).toHaveText('Codex CLI');
+    await page.locator('#policyContent').fill('# AGENTS.md\n\nInstruções de teste ainda não salvas.');
+    await page.locator('[data-view="console"]').click();
+    await page.locator('[data-view="agents"]').click();
+    await expect(page.locator('#policyContent')).toHaveValue('# AGENTS.md\n\nInstruções de teste ainda não salvas.');
+    await page.locator('#saveAgentPolicy').click();
+    await expect(page.locator('#policyMessage')).toContainText('AGENTS.md salvo');
+    expect(agentPolicy).toEqual({filename:'AGENTS.md',content:'# AGENTS.md\n\nInstruções de teste ainda não salvas.'});
     await page.locator('#agentProvider').selectOption('claude');
     await expect(page.locator('#agentModel')).toHaveValue('sonnet');
     await page.locator('#agentModel').selectOption('opus');
     await page.locator('#saveAgentSettings').click();
     await expect(page.locator('#model')).toHaveText('Claude Code · opus');
     expect(choice).toEqual({provider:'claude',model:'opus'});
+    await expect(page.locator('#activeAgentModel')).toHaveText('opus');
+    await page.locator('[data-view="console"]').click();
     await expect(input).toHaveValue('Meu rascunho ainda não enviado');
     await page.screenshot({path:info.outputPath('minimal-black-live.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});

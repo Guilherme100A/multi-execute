@@ -20,9 +20,51 @@
         <button type="button" class="nav-button" data-view="group">Multi-instância · Um jogo</button>
         <button type="button" class="nav-button" data-view="games">Multi-instância · Vários jogos</button>
         <button type="button" class="nav-button" data-view="sessions">Sessões <span id="navSessionCount">0</span></button>
+        <button type="button" class="nav-button" data-view="agents">Agentes</button>
         <button type="button" class="nav-button" data-view="console">Terminais ao vivo</button>
+        <button type="button" class="nav-button" data-view="setup">Setup</button>
+        <button type="button" class="nav-button" data-view="roblox">Configurações Roblox</button>
         <span id="feedState" class="feed-state" role="status">Conectando atualizações…</span>
       </nav>
+
+      <div id="robloxView" class="view" hidden>
+        <section class="roblox-settings-panel card" aria-labelledby="robloxSettingsHeading">
+          <div class="section-title"><div><p class="label">PREFERÊNCIAS</p><h2 id="robloxSettingsHeading">Configurações do Roblox</h2><p class="muted">Desempenho, exibição e opções do gerenciador.</p></div></div>
+          <form id="robloxSettingsForm">
+            <div class="roblox-settings-group"><h3>Desempenho e exibição</h3><p class="muted">As opções abaixo são globais para este usuário do Windows. Feche o Roblox antes de aplicar.</p>
+              <div class="roblox-settings-grid">
+                <label>Limite de FPS<select id="rbFps"><option value="">Não alterar</option><option value="-1">Automático do Roblox</option><option value="30">30 FPS</option><option value="60">60 FPS</option><option value="120">120 FPS</option><option value="144">144 FPS</option><option value="165">165 FPS</option><option value="240">240 FPS</option><option value="360">360 FPS</option><option value="480">480 FPS</option></select></label>
+                <label>Qualidade gráfica<select id="rbQuality"><option value="">Não alterar</option><option value="0">Automática</option><option value="1">1 · Mínima</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5 · Média</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10 · Máxima</option></select></label>
+                <label>Volume<select id="rbVolume"><option value="">Não alterar</option><option value="0">0% · Silencioso</option><option value="25">25%</option><option value="50">50%</option><option value="75">75%</option><option value="100">100%</option></select></label>
+                <label>Modo de exibição<select id="rbFullscreen"><option value="">Não alterar</option><option value="false">Janela</option><option value="true">Tela cheia</option></select></label>
+              </div>
+              <p id="robloxNativeStatus" class="muted roblox-native-status" role="status">Carregando configurações locais…</p>
+            </div>
+            <div class="roblox-settings-group"><h3>Gerenciador</h3><div class="roblox-settings-grid">
+              <label class="roblox-setting-toggle"><input id="rbHideImages" type="checkbox"><span>Ocultar imagens do painel<small>Interface mais simples, sem as imagens decorativas.</small></span></label>
+              <label>Máximo de jogos recentes<input id="rbRecentLimit" type="number" min="1" max="50" value="8"></label>
+            </div></div>
+            <div class="roblox-settings-actions"><button type="submit" id="robloxSave">Salvar preferências</button><button type="button" id="robloxApply" class="ghost">Salvar e aplicar no Roblox</button></div>
+            <p id="robloxSettingsMessage" class="message" role="status" aria-live="polite"></p>
+          </form>
+          <div class="roblox-settings-group roblox-settings-import"><h3>Importar do Account Manager</h3><p class="muted">Leia FPS, imagens e jogos recentes de um RAMSettings.ini. Senhas, cookies e configurações de acesso não são importados.</p><label class="roblox-import-button">Selecionar RAMSettings.ini<input id="robloxRamImport" type="file" accept=".ini,text/plain"></label><p id="robloxImportMessage" class="muted" role="status"></p></div>
+          <div class="roblox-settings-group"><h3>Jogos recentes</h3><p class="muted">Clique em um jogo para preencher o formulário de teste.</p><div id="robloxRecentGames" class="roblox-recent-games"><span class="muted">Nenhum jogo no histórico.</span></div></div>
+          <p class="muted roblox-settings-note">O limite de FPS depende do Roblox e do hardware. Um backup é criado antes de aplicar. As demais opções específicas do RAM não são transferidas automaticamente.</p>
+        </section>
+      </div>
+
+      <div id="setupView" class="view" hidden>
+        <section class="setup-panel card" aria-labelledby="setupHeading">
+          <div class="section-title setup-heading">
+            <div><p class="label">SEU COMPUTADOR</p><h2 id="setupHeading">Setup</h2><p class="muted">Veja o que já está pronto e o que falta para começar.</p></div>
+            <button type="button" id="setupCheckButton" class="ghost"><svg class="setup-refresh-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg><span>Verificar novamente</span></button>
+          </div>
+          <div id="setupSummary" class="setup-summary" role="status" aria-live="polite"><span class="setup-summary-symbol" aria-hidden="true">○</span><div><strong id="setupSummaryTitle">Vamos conferir seu setup</strong><p id="setupSummaryText">Clique para verificar os requisitos deste computador.</p></div></div>
+          <div id="setupItems" class="setup-items" aria-busy="false"></div>
+          <p id="setupCheckedAt" class="setup-checked-at"></p>
+          <p class="muted setup-note">A checagem verifica arquivos e configurações locais. Não abre jogos nem confirma o login das CLIs ou a validade das contas.</p>
+        </section>
+      </div>
 
       <div id="accountsView" class="view">
       <section id="accountManager" class="accounts-panel card">
@@ -99,28 +141,40 @@
         </section>
       </div>
 
+      <div id="agentsView" class="view" hidden>
+        <section class="agents-panel card" aria-labelledby="agentsHeading">
+          <div class="section-title"><div><p class="label">CONFIGURAÇÃO DAS SESSÕES</p><h2 id="agentsHeading">Agentes</h2><p class="muted">Escolha o agente, o modelo e as instruções compartilhadas.</p></div></div>
+          <div class="agents-current"><div><span class="label">AGENTE ATUAL</span><strong id="activeAgentProvider">Carregando…</strong><small id="agentAvailability"></small></div><div><span class="label">MODELO</span><strong id="activeAgentModel">—</strong></div></div>
+          <form id="agentSettingsForm" class="agent-settings agents-config">
+            <label>Agente<select id="agentProvider" required></select></label>
+            <label>Modelo<select id="agentModel" required></select></label>
+            <label id="customModelLabel" hidden>ID do modelo<input id="customModel" placeholder="ID exato do modelo" maxlength="100"></label>
+            <button id="saveAgentSettings">Salvar agente e modelo</button>
+            <p id="agentSettingsMessage" class="muted" role="status">Usa o login local da CLI escolhida. Selecione um modelo da lista ou informe outro ID.</p>
+          </form>
+          <section class="agents-policy" aria-labelledby="agentPolicyHeading">
+            <div class="section-title"><div><p class="label">INSTRUÇÕES GLOBAIS</p><h3 id="agentPolicyHeading">AGENTS.md das sessões</h3><p class="muted">Importe um arquivo ou escreva as instruções que os agentes vão receber.</p></div></div>
+            <form id="policyEditor" class="policy-editor">
+              <div class="policy-row">
+                <label class="agents-file-picker">Carregar AGENTS.md<input id="policyFile" type="file" accept=".md,text/markdown,text/plain"></label>
+                <span id="policyFilename" class="muted">Nenhum arquivo salvo</span>
+              </div>
+              <label for="policyContent">Instruções compartilhadas</label>
+              <textarea id="policyContent" rows="9" maxlength="65536" placeholder="# AGENTS.md&#10;&#10;Contexto do projeto, orientações e critérios para as sessões…"></textarea>
+              <div class="agents-policy-actions"><span class="muted">Markdown · até 64 KiB</span><button id="saveAgentPolicy" type="submit">Salvar AGENTS.md</button></div>
+              <p id="policyMessage" class="message" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+          <p class="muted agents-scope">Estas escolhas valem para os próximos prompts de todas as sessões. Execuções em andamento mantêm o agente, o modelo e as instruções com que começaram.</p>
+        </section>
+      </div>
+
       <div id="consoleView" class="view" hidden>
         <section class="console-shell">
           <div class="terminal-head">
             <div><p class="label">SEU WORKSPACE</p><h2>Terminais ao vivo</h2><p class="muted">Cada conta tem seu terminal. Organize e acompanhe as instâncias por lote.</p></div>
-            <div class="terminal-badges"><button id="policyToggle" type="button" class="ghost compact">AGENTS.md global</button><span id="model" class="model"></span></div>
+            <div class="terminal-badges"><button id="policyToggle" type="button" class="ghost compact">Configurar agentes</button><span id="model" class="model"></span></div>
           </div>
-          <form id="agentSettingsForm" class="agent-settings card">
-            <label>CLI do agente<select id="agentProvider" required></select></label>
-            <label>Modelo<select id="agentModel" required></select></label>
-            <label id="customModelLabel" hidden>Nome do modelo<input id="customModel" placeholder="ID exato do modelo" maxlength="100"></label>
-            <button id="saveAgentSettings">Aplicar</button>
-            <p id="agentSettingsMessage" class="muted" role="status">Usa o login local da CLI. A mudança vale para os próximos prompts.</p>
-          </form>
-          <form id="policyEditor" class="policy-editor" hidden>
-            <div class="policy-row">
-              <label class="file-picker">Selecionar arquivo Markdown<input id="policyFile" type="file" accept=".md,text/markdown,text/plain"></label>
-              <span id="policyFilename" class="muted">Nenhum arquivo salvo</span>
-              <button type="submit">Salvar para todas as sessões</button>
-            </div>
-            <textarea id="policyContent" rows="8" maxlength="65536" placeholder="# AGENTS.md&#10;&#10;Instruções compartilhadas para todas as sessões…"></textarea>
-            <p id="policyMessage" class="message"></p>
-          </form>
           <div id="workspaceTabs" class="workspace-tabs" aria-label="Sessões de trabalho"></div>
           <section class="batch-terminal card" aria-labelledby="batchTerminalTitle">
             <div class="worker-terminal-head">

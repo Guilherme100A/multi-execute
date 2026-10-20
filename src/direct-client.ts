@@ -11,10 +11,10 @@ export class DirectRobloxClient {
   private holder?: ChildProcessWithoutNullStreams;
   private starting?: Promise<void>;
   constructor(private vault: string, private execute: DirectExecutor = (action, input) => this.invoke(action, input),
-    private multi = true) {}
+    private multi = true, private helperFile = resolve('scripts/direct-roblox.ps1')) {}
 
   private args(action: string): string[] {
-    return ['-NoProfile', '-NonInteractive', '-File', resolve('scripts/direct-roblox.ps1'), '-Action', action, '-Vault', this.vault];
+    return ['-NoProfile', '-NonInteractive', '-File', this.helperFile, '-Action', action, '-Vault', this.vault];
   }
   private invoke(action: DirectAction, input: Record<string, unknown>): Promise<DirectResult> {
     if (process.platform !== 'win32') return Promise.reject(new Error('Direct Roblox launching requires Windows'));

@@ -1,8 +1,12 @@
 {
-  "name": "authorized-roblox-pipeline",
+  "name": "multi-execute",
+  "productName": "Multi Execute",
+  "description": "Desktop launcher for authorized automated Roblox game testing",
+  "author": "Guilherme100A",
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "dist/desktop/bootstrap.cjs",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -11,24 +15,70 @@
     "postinstall": "node scripts/apply-mcp-patch.mjs",
     "start": "node --env-file-if-exists=.env dist/src/index.js",
     "dev": "tsx --env-file-if-exists=.env src/index.ts",
+    "desktop": "npm run build && electron .",
+    "package:win": "npm run build && electron-builder --win nsis portable",
+    "package:dir": "npm run build && electron-builder --dir",
     "batch": "tsx --env-file-if-exists=.env src/batch.ts",
     "setup:real": "tsx --env-file-if-exists=.env src/setup-real.ts",
     "import:ram": "tsx --env-file-if-exists=.env src/import-ram.ts",
     "test": "tsx --test test/*.test.ts",
     "test:e2e:live": "playwright test e2e/live-project.spec.ts",
     "test:e2e:ui": "playwright test e2e/ui-realtime.spec.ts e2e/architecture.spec.ts",
+    "test:desktop": "npm run build && playwright test e2e/desktop.spec.ts",
     "test:cli:live": "tsx scripts/check-agent-clis.ts",
     "check": "npm run build && npm test"
+  },
+  "build": {
+    "appId": "com.guilherme100a.multiexecute",
+    "productName": "Multi Execute",
+    "asar": true,
+    "asarUnpack": [
+      "scripts/direct-roblox.ps1",
+      "desktop/icon.ico"
+    ],
+    "files": [
+      "dist/src/**/*",
+      "dist/desktop/**/*",
+      "desktop/setup.html",
+      "desktop/icon.ico",
+      "public/**/*",
+      "scripts/direct-roblox.ps1",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "icon": "desktop/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "Multi-Execute-${version}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "Multi-Execute-${version}-Portable.${ext}"
+    }
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "express": "^5.1.0",
+    "fast-xml-parser": "^5.11.2",
     "roblox-mcp-difz": "^1.6.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.0",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   }
