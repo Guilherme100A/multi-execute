@@ -10,13 +10,15 @@ import type { AgentRunner } from './agent.js';
 import type { Account } from './validation.js';
 import type { AccountRegistry } from './account-registry.js';
 import type { RamClient } from './clients.js';
+import type { RobloxBrowserLogin } from './browser-login.js';
 import type { SetupReport } from './setup-check.js';
 import type { RobloxSettings } from './roblox-settings.js';
 
 export function createApp(pipeline: Pipeline, callbackToken: string, autoexecToken: string,
   findings: string, log: Logger, agent?: AgentRunner, accounts: Account[] = [], accountRegistry?: AccountRegistry,
   localAccounts?: Pick<RamClient, 'accounts' | 'importCookie'>, automation = () => ({ enabled: false, state: 'stopped', error: null as string | null }),
-  publicDirectory = resolve('public'), setupCheck?: () => Promise<SetupReport>, robloxSettings?: RobloxSettings) {
+  publicDirectory = resolve('public'), setupCheck?: () => Promise<SetupReport>, robloxSettings?: RobloxSettings,
+  browserLogin?: Pick<RobloxBrowserLogin, 'signIn'>) {
   const app = express();
   const activePrompts = new Map<AbortController, Promise<void>>();
   app.disable('x-powered-by');
@@ -116,15 +118,41 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
     if (!localAccounts || !accountRegistry) { res.status(503).json({ error: 'Local account management is unavailable' }); return; }
     try {
       const alias = aliasValue(req.body?.alias);
-      if (accounts.some(account => account.alias.toLowerCase() === alias.toLowerCase())) throw new ConflictError('Account alias is already configured');
       const before = await localAccounts.accounts();
       await localAccounts.importCookie(req.body?.cookie);
       const after = await localAccounts.accounts();
       const previous = new Set(before.map(value => value.toLowerCase()));
       const added = after.filter(value => !previous.has(value.toLowerCase()));
-      if (added.length !== 1) throw new ConflictError('Session saved, but a unique new account was not detected; use Sync existing account');
-      const account = accountRegistry.add(alias, added[0]!);
-      log.info('account_imported', { alias: account.alias, username: added[0] });
+      const configured = accounts.find(account => account.alias.toLowerCase() === alias.toLowerCase());
+      const username = added.length === 1 ? added[0] : configured && after.find(value => value.toLowerCase() === configured.robloxUsername.toLowerCase());
+      if (!username) throw new ConflictError('Session saved, but a unique new account was not detected; use Sync existing account');
+      const account = accountRegistry.add(alias, username);
+      log.info('account_imported', { alias: account.alias, username });
+      res.status(201).json({ account });
+    } catch (error) {
+      if (error instanceof InputError || error instanceof ConflictError) throw error;
+      res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post('/accounts/browser-login', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${req.headers.host}`) { res.status(403).json({ error: 'Invalid origin' }); return; }
+    if (!localAccounts || !accountRegistry || !browserLogin) { res.status(503).json({ error: 'Browser sign-in is unavailable' }); return; }
+    try {
+      const alias = aliasValue(req.body?.alias);
+      const configured = accounts.find(account => account.alias.toLowerCase() === alias.toLowerCase());
+      if (!configured) throw new InputError('Account alias is not configured');
+      const before = await localAccounts.accounts();
+      const cookie = await browserLogin.signIn(configured.robloxUsername);
+      await localAccounts.importCookie(cookie);
+      const after = await localAccounts.accounts();
+      const previous = new Set(before.map(value => value.toLowerCase()));
+      const added = after.filter(value => !previous.has(value.toLowerCase()));
+      const username = added.length === 1 ? added[0] : configured && after.find(value => value.toLowerCase() === configured.robloxUsername.toLowerCase());
+      if (!username) throw new ConflictError('The signed-in account could not be mapped uniquely; use Sync existing account');
+      const account = accountRegistry.add(alias, username);
+      log.info('account_browser_login', { alias: account.alias, username });
       res.status(201).json({ account });
     } catch (error) {
       if (error instanceof InputError || error instanceof ConflictError) throw error;

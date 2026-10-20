@@ -37,7 +37,7 @@ Use somente em jogos próprios ou com autorização explícita. `AUTHORIZED_PLAC
 
 Depois da configuração única:
 
-1. Com Real aberto e seu MCP habilitado na configuração inicial, abra `http://127.0.0.1:3000`, informe o token e cole um ou mais links, um por linha. O lote usa uma conta por link, começando pela conta selecionada.
+1. Com Real aberto, abra `http://127.0.0.1:3000` e cole um ou mais links, um por linha. O lote usa uma conta por link, começando pela conta selecionada. O Launcher tenta iniciar o Real MCP pela interface acessível do Windows; se o botão não estiver visível, abra `Settings → Connections` e pressione **Start**.
 2. O Launcher inicia o servidor MCP local, valida todos os PlaceIds, cria os workers e confirma as identidades das contas. No modo direto, prepara todos os tickets do lote antes de abrir as janelas, para o Real detectar os clientes juntos.
 3. O coordenador chama o conector oficial instalado com o Real para injetar nos clientes, verifica conta/jogo e executa o bootstrap. Ele recebe o `worker_id` correto do Launcher.
 4. O bootstrap carrega `mcp.lua` uma única vez para aquele `JobId`.
@@ -63,7 +63,9 @@ npm run setup:real
 npm start
 ```
 
-O painel é exclusivamente local e não possui login. O Launcher gera automaticamente credenciais temporárias para os callbacks internos do agente e do Auto Execute. Se precisar que essas credenciais permaneçam iguais depois de reiniciar o Launcher, defina opcionalmente `INTERNAL_CALLBACK_TOKEN` e `AUTOEXEC_TOKEN` com valores distintos de pelo menos 24 caracteres.
+O painel é exclusivamente local e não possui login. Para cadastrar contas, prefira **Entrar pelo Roblox**: uma janela isolada do site oficial é aberta para senha, passkey, captcha e 2FA, e o Launcher guarda somente a sessão resultante no cofre DPAPI. O Launcher nunca armazena senhas. Ele também gera automaticamente credenciais temporárias para os callbacks internos do agente e do Auto Execute. Se precisar que essas credenciais permaneçam iguais depois de reiniciar o Launcher, defina opcionalmente `INTERNAL_CALLBACK_TOKEN` e `AUTOEXEC_TOKEN` com valores distintos de pelo menos 24 caracteres.
+
+O login preenche somente o username configurado e deixa senha, captcha e 2FA para o operador. Para usar um proxy exclusivamente nessa janela isolada, configure `BROWSER_PROXY_SERVER` e, se necessário, `BROWSER_PROXY_USERNAME`/`BROWSER_PROXY_PASSWORD` no `.env`. O Roblox Player não usa esse proxy.
 
 O arquivo local `accounts.json` segue este formato:
 
@@ -118,7 +120,7 @@ Cada request tem timeout de 10 s e até 3 tentativas totais, com esperas de 2 s 
 ## Configuração única do Project Real
 
 1. Abra o Real e inicie **Real MCP** em `Settings → Connections`.
-2. Mantenha o Real aberto. O projeto detecta `LOCALAPPDATA/Real/data/mcp/real-mcp.exe`; use `REAL_MCP_EXECUTABLE` apenas se a instalação estiver em outro caminho.
+2. Mantenha o Real aberto. O projeto detecta `LOCALAPPDATA/Real/real-*/bin/real-mcp.exe` e o caminho legado `LOCALAPPDATA/Real/data/mcp/real-mcp.exe`; use `REAL_MCP_EXECUTABLE` apenas se a instalação estiver em outro caminho.
 3. Inicie o projeto com `npm start`. Ele gera e instala o bootstrap no AutoExec do Real e mantém o servidor MCP em `127.0.0.1:28429` no mesmo processo.
 
 `npm run setup:real` continua disponível para gerar o arquivo quando `AUTO_CONNECT=false`. Nesse fluxo manual, defina `getgenv().MCP_PROCESS_ID` com o PID real do cliente antes de executar o bootstrap. O fluxo automático faz isso sem intervenção.

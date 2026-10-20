@@ -14,7 +14,8 @@ export class DirectRobloxClient {
     private multi = true, private helperFile = resolve('scripts/direct-roblox.ps1')) {}
 
   private args(action: string): string[] {
-    return ['-NoProfile', '-NonInteractive', '-File', this.helperFile, '-Action', action, '-Vault', this.vault];
+    // Process-only bypass: the signed-in user's global PowerShell policy is never changed.
+    return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', this.helperFile, '-Action', action, '-Vault', this.vault];
   }
   private invoke(action: DirectAction, input: Record<string, unknown>): Promise<DirectResult> {
     if (process.platform !== 'win32') return Promise.reject(new Error('Direct Roblox launching requires Windows'));

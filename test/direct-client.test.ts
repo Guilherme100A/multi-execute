@@ -37,7 +37,7 @@ $encrypted=[Security.Cryptography.ProtectedData]::Protect($clear,$entropy,[Secur
 `);
   const direct = new DirectRobloxClient(vault);
   try {
-    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', fixture, '-OutputFile', source], { windowsHide: true });
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', fixture, '-OutputFile', source], { windowsHide: true });
     const original = readFileSync(source);
     assert.deepEqual(await direct.importRam(source, ['AlphaUser', 'BetaUser']), ['AlphaUser', 'BetaUser']);
     assert.deepEqual(await direct.accounts(), ['AlphaUser', 'BetaUser']);

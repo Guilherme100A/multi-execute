@@ -76,6 +76,12 @@
           <button type="button" data-account-method="txt" aria-pressed="false"><b>Importar TXT</b><span>Várias contas em um arquivo</span></button>
         </div>
         <div id="individualAccounts" class="account-grid">
+          <form id="browserAccountForm" class="account-form">
+            <div><p class="label">RECOMENDADO</p><h3>Entrar pelo Roblox</h3><p class="muted">Abre uma janela isolada do site oficial. A senha e o 2FA não passam pelo Launcher; somente a sessão resultante é criptografada pelo Windows.</p></div>
+            <label>Nome dentro do Launcher<input id="browserAlias" placeholder="conta-principal" required></label>
+            <button>Abrir login oficial do Roblox</button>
+            <button id="browserAll" type="button" class="ghost">Entrar em todas, uma por vez</button>
+          </form>
           <form id="syncAccountForm" class="account-form">
             <div><p class="label">CONTA EXISTENTE</p><h3>Usar uma conta salva</h3><p class="muted">Escolha uma conta local e dê um nome para identificá-la.</p></div>
             <label>Conta encontrada<select id="ramAccount" required></select></label>
@@ -83,7 +89,7 @@
             <button>Adicionar conta</button>
           </form>
           <form id="importAccountForm" class="account-form sensitive">
-            <div><p class="label">NOVA CONTA</p><h3>Cadastrar conta</h3><p class="muted">O método atual utiliza uma sessão Roblox existente.</p></div>
+            <div><p class="label">AVANÇADO</p><h3>Importar sessão</h3><p class="muted">Use somente se você já possui uma sessão Roblox. Nunca envie esse valor pelo chat.</p></div>
             <label>Nome dentro do Launcher<input id="importAlias" placeholder="conta-teste" required></label>
             <label>Cookie de sessão Roblox<input id="securityCookie" type="password" autocomplete="off" placeholder="_ | WARNING:-DO-NOT-SHARE-THIS..." required></label>
             <button>Salvar conta local</button>

@@ -3,6 +3,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
 import type { Server } from 'node:http';
 import type { Pipeline } from './pipeline.js';
 import type { McpClient } from './clients.js';
@@ -15,16 +16,47 @@ export interface RealConnection {
   close(): Promise<void>;
 }
 
+type RealActivation = { ok: boolean; message: string };
+
+function activateRealMcp(): Promise<RealActivation> {
+  if (process.platform !== 'win32') return Promise.resolve({ ok: false, message: 'Real MCP requires Windows' });
+  return new Promise(resolveActivation => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+      resolve('scripts/start-real-mcp.ps1')], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+    let output = '';
+    const timer = setTimeout(() => { child.kill(); resolveActivation({ ok: false, message: 'Real MCP activation timed out' }); }, 35_000);
+    child.stdout.on('data', chunk => { output = (output + String(chunk)).slice(-16_384); });
+    child.once('error', () => { clearTimeout(timer); resolveActivation({ ok: false, message: 'Could not start the Real MCP helper' }); });
+    child.once('close', () => {
+      clearTimeout(timer);
+      try {
+        const parsed = JSON.parse(output.trim()) as RealActivation;
+        resolveActivation({ ok: parsed.ok === true, message: String(parsed.message || '') });
+      } catch { resolveActivation({ ok: false, message: 'Real MCP still needs to be started in Settings > Connections' }); }
+    });
+  });
+}
+
 export class RealConnectionClient implements RealConnection {
   private client?: Client;
-  constructor(private executable: string) {}
+  private activation?: Promise<RealActivation>;
+  private lastActivation = 0;
+  constructor(private executable: string, private activate: () => Promise<RealActivation> = activateRealMcp) {}
   async connect(): Promise<void> {
     if (this.client) return;
+    if (!this.activation || Date.now() - this.lastActivation >= 15_000) {
+      this.lastActivation = Date.now();
+      this.activation = this.activate();
+    }
+    const activation = await this.activation;
     const client = new Client({ name: 'multi-execute', version: '1.0.0' }, { capabilities: {} });
     try {
       await client.connect(new StdioClientTransport({ command: this.executable, stderr: 'ignore' }));
       this.client = client;
-    } catch { await client.close(); throw new Error('Não foi possível conectar ao Project Real. Abra o Real e habilite seu MCP em Settings → Connections.'); }
+    } catch {
+      await client.close();
+      throw new Error(activation.message || 'Não foi possível conectar ao Project Real. Abra o Real e habilite seu MCP em Settings → Connections.');
+    }
   }
   async call(name: string, args: Record<string, unknown>): Promise<unknown> {
     await this.connect();
