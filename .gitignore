@@ -6,6 +6,8 @@ release/
 .env
 .maestri/
 accounts.json
+*.dpapi.passwords
+*.dpapi.passwords.tmp
 project-real-autoexec.lua
 data/
 logs/

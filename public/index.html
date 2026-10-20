@@ -77,10 +77,9 @@
         </div>
         <div id="individualAccounts" class="account-grid">
           <form id="browserAccountForm" class="account-form">
-            <div><p class="label">RECOMENDADO</p><h3>Entrar pelo Roblox</h3><p class="muted">Abre uma janela isolada do site oficial. A senha e o 2FA não passam pelo Launcher; somente a sessão resultante é criptografada pelo Windows.</p></div>
-            <label>Nome dentro do Launcher<input id="browserAlias" placeholder="conta-principal" required></label>
+            <div><p class="label">LOGIN INDIVIDUAL</p><h3>Entrar pelo Roblox</h3><p class="muted">Escolha uma conta para abrir o site oficial. Se houver senha salva, ela será preenchida. Clique em Entrar no site e conclua captcha e 2FA.</p></div>
+            <label>Conta cadastrada<select id="browserAlias" required></select></label>
             <button>Abrir login oficial do Roblox</button>
-            <button id="browserAll" type="button" class="ghost">Entrar em todas, uma por vez</button>
           </form>
           <form id="syncAccountForm" class="account-form">
             <div><p class="label">CONTA EXISTENTE</p><h3>Usar uma conta salva</h3><p class="muted">Escolha uma conta local e dê um nome para identificá-la.</p></div>
@@ -96,10 +95,11 @@
           </form>
         </div>
         <section id="txtAccounts" class="txt-import" hidden>
-          <div><p class="label">IMPORTAÇÃO EM LOTE</p><h3>Adicione seu arquivo de contas</h3><p class="muted">O formato das linhas será definido na próxima etapa.</p></div>
+          <div><p class="label">IMPORTAÇÃO EM LOTE</p><h3>Importar usuários e senhas</h3><p class="muted">Uma conta por linha, no formato usuario:senha. Até 100 contas e 64 KiB. Reimportar uma conta atualiza sua senha salva.</p></div>
           <label class="txt-dropzone" for="accountsTxt"><span class="txt-file-icon" aria-hidden="true">TXT</span><strong>Selecionar arquivo .txt</strong><span>Escolha um arquivo no computador</span><input id="accountsTxt" type="file" accept=".txt,text/plain"></label>
           <p id="txtFileStatus" class="muted" role="status">Nenhum arquivo selecionado.</p>
-          <div class="txt-import-footer"><p class="muted">Prévia de interface: o arquivo não será lido, enviado ou importado.</p><button type="button" disabled>Importar contas · Em breve</button></div>
+          <label for="credentialsText">Ou cole a lista aqui<textarea id="credentialsText" rows="8" maxlength="65536" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="UsuarioExemplo:senha-de-exemplo"></textarea></label>
+          <div class="txt-import-footer"><p class="muted">As senhas são criptografadas para este usuário do Windows. Depois de importar, escolha Cadastro individual para entrar em cada conta.</p><button id="importCredentials" type="button">Importar contas</button></div>
         </section>
         <p id="accountMessage" class="message"></p>
       </section>

@@ -11,6 +11,7 @@ import { DirectRobloxClient } from './direct-client.js';
 import { AutoConnector, LocalMcpServer, RealConnectionClient, writeBootstrap } from './auto-connect.js';
 import { inspectSetup } from './setup-check.js';
 import { RobloxSettings } from './roblox-settings.js';
+import { PasswordStore } from './password-store.js';
 import { loadRobloxLoginOptions, RobloxBrowserLogin, RobloxLogin } from './roblox-login.js';
 
 export type RunningApplication = {
@@ -28,7 +29,8 @@ export async function startApplication(env = process.env): Promise<RunningApplic
   const launcher = config.launchBackend === 'direct' ? direct : ram;
   const accountRegistry = new AccountRegistry(config.accountsFile, config.accounts);
   const browserLogin = new RobloxBrowserLogin(undefined, undefined, loadRobloxLoginOptions(env).proxy);
-  const robloxLogin = new RobloxLogin(config.accounts, accountRegistry, launcher, log, browserLogin);
+  const passwords = new PasswordStore(`${config.directAccountsFile}.passwords`);
+  const robloxLogin = new RobloxLogin(config.accounts, accountRegistry, launcher, log, browserLogin, passwords);
   const pipeline = new Pipeline(store, launcher, mcp, config.accounts, config.authorized, log, Date.now,
     config.healthIntervalMs, config.launchTimeoutMs, config.injectionMode);
   const agent = new AgentRunner(config.agentCliCommand, config.agentModel, `http://${config.host}:${config.port}`,

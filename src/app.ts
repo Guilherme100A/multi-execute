@@ -18,7 +18,7 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
   findings: string, log: Logger, agent?: AgentRunner, accounts: Account[] = [], accountRegistry?: AccountRegistry,
   localAccounts?: Pick<RamClient, 'accounts' | 'importCookie'>, automation = () => ({ enabled: false, state: 'stopped', error: null as string | null }),
   publicDirectory = resolve('public'), setupCheck?: () => Promise<SetupReport>, robloxSettings?: RobloxSettings,
-  robloxLogin?: Pick<RobloxLogin, 'signIn'>) {
+  robloxLogin?: Pick<RobloxLogin, 'signIn'> & Partial<Pick<RobloxLogin, 'importCredentials'>>) {
   const app = express();
   const activePrompts = new Map<AbortController, Promise<void>>();
   app.disable('x-powered-by');
@@ -132,6 +132,19 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
     } catch (error) {
       if (error instanceof InputError || error instanceof ConflictError) throw error;
       res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  app.post('/accounts/credentials', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${req.headers.host}`) { res.status(403).json({ error: 'Invalid origin' }); return; }
+    if (!robloxLogin?.importCredentials) { res.status(503).json({ error: 'Cofre de senhas indisponível.' }); return; }
+    try {
+      const imported = await robloxLogin.importCredentials(req.body?.text);
+      res.status(201).json({ imported });
+    } catch (error) {
+      if (error instanceof InputError || error instanceof ConflictError) throw error;
+      res.status(502).json({ error: 'Não foi possível salvar as contas no cofre local.' });
     }
   });
   app.post('/accounts/browser-login', async (req, res) => {
@@ -251,7 +264,7 @@ export function createApp(pipeline: Pipeline, callbackToken: string, autoexecTok
     const code = error instanceof InputError || error instanceof SyntaxError ? 400 : error instanceof ConflictError ? 409 :
       error && typeof error === 'object' && 'status' in error && error.status === 413 ? 413 : 500;
     if (code === 500) log.error('request_error', { error: String(error) });
-    res.status(code).json({ error: code === 500 ? 'Internal server error' : error instanceof Error ? error.message : String(error) });
+    res.status(code).json({ error: code === 500 ? 'Internal server error' : error instanceof SyntaxError ? 'Invalid JSON' : error instanceof Error ? error.message : String(error) });
   };
   app.use(errors);
   return Object.assign(app, {

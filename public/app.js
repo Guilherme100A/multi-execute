@@ -178,6 +178,9 @@ async function loadConfig() {
   $('agentAvailability').textContent=config.agent.configured ? 'CLI disponível neste computador' : 'Instale e autentique a CLI para usar os terminais';
   launchAccounts=config.accounts;
   $('account').replaceChildren(...config.accounts.map(row => new Option(`${row.alias} (${row.username})`, row.alias)));
+  const loginAlias=$('browserAlias').value;
+  $('browserAlias').replaceChildren(...config.accounts.map(row => new Option(`${row.alias} (${row.username})`, row.alias)));
+  if(config.accounts.some(row=>row.alias===loginAlias)) $('browserAlias').value=loginAlias;
   renderAccountChoices();
   $('prompt').disabled = !agentConfigured; $('sendPrompt').disabled = !agentConfigured;
   if (!agentConfigured) $('prompt').placeholder = 'Instale e autentique a CLI escolhida para habilitar o agente';
@@ -507,9 +510,26 @@ document.querySelectorAll('[data-account-method]').forEach(button=>button.onclic
   $('individualAccounts').hidden=!individual;$('txtAccounts').hidden=individual;
   document.querySelectorAll('[data-account-method]').forEach(tab=>{const active=tab===button;tab.classList.toggle('active',active);tab.setAttribute('aria-pressed',String(active));});
 });
-$('accountsTxt').onchange=()=>{
+$('accountsTxt').onchange=async()=>{
   const file=$('accountsTxt').files?.[0];
-  $('txtFileStatus').textContent=file?`${file.name} · ${Math.ceil(file.size/1024)} KB · aguardando definição do formato`:'Nenhum arquivo selecionado.';
+  if (!file) return;
+  try {
+    if (file.size>64*1024) throw new Error('Escolha um arquivo de até 64 KiB.');
+    $('credentialsText').value=await file.text();
+    $('txtFileStatus').textContent=`${file.name} · carregado para importação`;
+  } catch(error) { $('txtFileStatus').textContent=error.message; }
+  finally { $('accountsTxt').value=''; }
+};
+$('importCredentials').onclick=async()=>{
+  const button=$('importCredentials'); button.disabled=true;
+  $('accountMessage').textContent='Salvando contas no cofre do Windows…';
+  try {
+    const data=await api('/accounts/credentials',{method:'POST',body:JSON.stringify({text:$('credentialsText').value})});
+    $('credentialsText').value=''; $('txtFileStatus').textContent='Lista importada.';
+    await loadConfig();
+    $('accountMessage').textContent=`${data.imported} conta(s) salva(s). Em Cadastro individual, escolha uma conta e abra o login oficial.`;
+  } catch(error) { $('accountMessage').textContent=error.message; }
+  finally { button.disabled=false; }
 };
 document.querySelectorAll('.nav-button').forEach(button=>button.onclick=()=>{showView(button.dataset.view);if(button.dataset.view==='accounts') void refreshRam();});
 $('selectAllAccounts').onclick=()=>{ $('accountChoices').querySelectorAll('input').forEach((input,index)=>{input.checked=index<10;}); updateSelectedAccounts(); };
@@ -539,7 +559,6 @@ $('policyEditor').onsubmit=async event=>{
 };
 $('syncAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent=''; try { await api('/accounts/sync',{method:'POST',body:JSON.stringify({alias:$('syncAlias').value.trim(),username:$('ramAccount').value})}); $('syncAlias').value=''; await loadConfig(); $('accountMessage').textContent='Conta adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
 $('browserAccountForm').onsubmit=async event=>{ event.preventDefault(); const button=event.submitter; button.disabled=true; $('accountMessage').textContent='Entre na janela oficial do Roblox. Aguardando a sessão…'; try { await api('/accounts/browser-login',{method:'POST',body:JSON.stringify({alias:$('browserAlias').value.trim()})}); $('browserAlias').value=''; await loadConfig(); await refreshRam(); $('accountMessage').textContent='Conta autenticada e protegida pelo Windows.'; } catch(error) { $('accountMessage').textContent=error.message; } finally { button.disabled=false; } };
-$('browserAll').onclick=async event=>{ const button=event.currentTarget; button.disabled=true; try { for(const account of launchAccounts){ $('accountMessage').textContent=`Aguardando login de ${account.alias} (${account.username})…`; await api('/accounts/browser-login',{method:'POST',body:JSON.stringify({alias:account.alias})}); await refreshRam(); } await loadConfig(); $('accountMessage').textContent='Todas as contas foram autenticadas e protegidas pelo Windows.'; } catch(error) { $('accountMessage').textContent=error.message; } finally { button.disabled=false; } };
 $('importAccountForm').onsubmit=async event=>{ event.preventDefault(); $('accountMessage').textContent='Salvando a sessão criptografada…'; const cookie=$('securityCookie').value; $('securityCookie').value=''; try { await api('/accounts/import',{method:'POST',body:JSON.stringify({alias:$('importAlias').value.trim(),cookie})}); $('importAlias').value=''; await loadConfig(); await refreshRam(); $('accountMessage').textContent='Conta protegida pelo Windows e adicionada ao Launcher.'; } catch(error) { $('accountMessage').textContent=error.message; } };
 $('robloxSettingsForm').onsubmit = event => { event.preventDefault(); void saveRobloxSettings(); };
 $('robloxApply').onclick = () => { void saveRobloxSettings(true); };

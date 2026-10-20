@@ -3,7 +3,8 @@
  *
  * Edit this file to change the isolated Edge window, username prefill, optional
  * browser-only proxy, login timeout, session capture, DPAPI import, or account
- * mapping. Passwords, CAPTCHA and 2FA deliberately remain inside roblox.com.
+ * mapping. Optional passwords are read from the local DPAPI vault; the operator
+ * submits the official login and completes CAPTCHA and 2FA manually.
  */
 import { chromium, type Browser } from 'playwright-core';
 import type { Account } from './validation.js';
@@ -12,9 +13,10 @@ import type { AccountRegistry } from './account-registry.js';
 import type { RamClient } from './clients.js';
 import type { Logger } from './logger.js';
 import { ConflictError } from './store.js';
+import { parseCredentials, type PasswordStore } from './password-store.js';
 
 export interface LoginBrowser {
-  newPage(): Promise<{ goto(url: string, options: { waitUntil: 'domcontentloaded'; timeout: number }): Promise<unknown>; locator(selector: string): { fill(value: string): Promise<void> }; isClosed(): boolean; bringToFront(): Promise<void> }>;
+  newPage(): Promise<{ url(): string; goto(url: string, options: { waitUntil: 'domcontentloaded'; timeout: number }): Promise<unknown>; locator(selector: string): { fill(value: string): Promise<void> }; isClosed(): boolean; bringToFront(): Promise<void> }>;
   contexts(): { cookies(url: string): Promise<{ name: string; value: string }[]> }[];
   close(): Promise<void>;
   isConnected(): boolean;
@@ -45,7 +47,7 @@ export class RobloxBrowserLogin {
   private active = false;
   constructor(private open: LoginBrowserFactory = openEdge, private timeoutMs = 5 * 60_000, private proxy?: BrowserProxy) {}
 
-  async signIn(username?: string): Promise<string> {
+  async signIn(username?: string, password?: string): Promise<string> {
     if (this.active) throw new ConflictError('Another Roblox sign-in window is already open');
     this.active = true;
     let browser: LoginBrowser | undefined;
@@ -67,6 +69,12 @@ export class RobloxBrowserLogin {
       }
       if (navigationError) throw navigationError;
       if (username) await page.locator('#login-username').fill(username);
+      if (password) {
+        if (new URL(page.url()).origin !== 'https://www.roblox.com') throw new Error('A janela de login não está no site oficial do Roblox.');
+        try { await page.locator('#login-password').fill(password); }
+        catch { throw new Error('Não foi possível preencher a senha na janela oficial.'); }
+        finally { password = undefined; }
+      }
       const deadline = Date.now() + this.timeoutMs;
       while (Date.now() < deadline && browser.isConnected() && !page.isClosed()) {
         const cookies = await browser.contexts()[0]?.cookies('https://www.roblox.com') ?? [];
@@ -84,15 +92,32 @@ export class RobloxBrowserLogin {
 
 /** Owns the complete flow from alias selection through encrypted local import. */
 export class RobloxLogin {
+  private importing = false;
   constructor(private configuredAccounts: Account[], private registry: AccountRegistry, private local: LocalAccountStore,
-    private log: Logger, private browser: Pick<RobloxBrowserLogin, 'signIn'>) {}
+    private log: Logger, private browser: Pick<RobloxBrowserLogin, 'signIn'>,
+    private passwords?: Pick<PasswordStore, 'save' | 'get'>) {}
+
+  async importCredentials(input: unknown): Promise<number> {
+    if (!this.passwords) throw new Error('Cofre de senhas indisponível.');
+    if (this.importing) throw new ConflictError('Uma importação já está em andamento.');
+    const rows = parseCredentials(input);
+    const usernames = rows.map(row => row.username);
+    this.registry.prepareUsernames(usernames);
+    this.importing = true;
+    try {
+      await this.passwords.save(rows);
+      this.registry.addUsernames(usernames);
+      return rows.length;
+    } finally { this.importing = false; }
+  }
 
   async signIn(aliasInput: unknown): Promise<Account> {
     const alias = aliasValue(aliasInput);
     const configured = this.configuredAccounts.find(account => account.alias.toLowerCase() === alias.toLowerCase());
     if (!configured) throw new InputError('Account alias is not configured');
     const before = await this.local.accounts();
-    const cookie = await this.browser.signIn(configured.robloxUsername);
+    const password = await this.passwords?.get(configured.robloxUsername);
+    const cookie = await this.browser.signIn(configured.robloxUsername, password);
     await this.local.importCookie(cookie);
     const after = await this.local.accounts();
     const previous = new Set(before.map(value => value.toLowerCase()));
