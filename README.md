@@ -1,8 +1,10 @@
-# Roblox Security Pipeline
+# Multi Execute — Launcher Windows
+
+A branch principal `main` contém o aplicativo Windows (Electron), sua interface e seu backend. Ela já incorpora a branch `launchermulti`; o launcher é a versão principal deste projeto. O modo de navegador fica disponível como opção de desenvolvimento.
 
 ## Aplicativo Windows
 
-O projeto também pode ser executado em uma janela desktop, com Node.js e a interface incluídos no pacote. Para uso local, abra `release/Multi-Execute-1.0.0-Setup.exe` e siga o instalador, ou execute `release/Multi-Execute-1.0.0-Portable.exe` sem instalar.
+O launcher abre em uma janela desktop, com Node.js e a interface incluídos no pacote. Para uso local, abra `release/Multi-Execute-1.0.0-Setup.exe` e siga o instalador, ou execute `release/Multi-Execute-1.0.0-Portable.exe` sem instalar. Em uma distribuição ZIP da pasta do aplicativo, extraia todos os arquivos e abra `Multi Execute.exe`, mantendo a pasta `resources` ao lado dele.
 
 Na primeira abertura, informe os PlaceIds dos seus jogos autorizados. O botão **Configurações** na barra superior permite alterar a lista depois. As contas podem ser adicionadas pelo painel. O aplicativo abre em tamanho médio, com barra preta integrada e cantos arredondados no Windows 11. Fechar o aplicativo encerra o servidor local.
 

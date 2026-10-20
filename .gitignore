@@ -3,6 +3,7 @@ test-results/
 playwright-report/
 dist/
 release/
+release-desktop/
 .env
 .maestri/
 accounts.json

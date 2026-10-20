@@ -105,6 +105,15 @@ test('desktop setup persists, loads the dashboard and releases its server on exi
     expect(desktopLog).toContain('backend_started');
     expect(desktopLog).toContain('settings_or_startup_failed');
     expect(desktopLog).not.toContain('window_shape_failed');
+    await page.getByRole('button', { name: 'Contas', exact: true }).click();
+    await page.locator('[data-account-method="txt"]').click();
+    await page.locator('#credentialsText').fill('DesktopTestUser:fake-desktop-password');
+    await page.locator('#importCredentials').click();
+    await expect(page.locator('#accountMessage')).toContainText('1 conta(s)');
+    await expect(page.locator('#credentialsText')).toHaveValue('');
+    expect(await readFile(join(directory, 'data', 'accounts.dpapi.passwords'), 'utf8')).not.toContain('fake-desktop-password');
+    expect(await readFile(join(directory, 'accounts.json'), 'utf8')).not.toContain('fake-desktop-password');
+    await page.screenshot({ path: test.info().outputPath('desktop-credentials.png'), animations: 'disabled' });
     await page.screenshot({ path: test.info().outputPath('desktop-setup.png'), animations: 'disabled' });
     const nativeScreenshot = await app.evaluate(async ({ BrowserWindow, desktopCapturer }) => {
       const window = BrowserWindow.getAllWindows()[0]!;
@@ -123,6 +132,7 @@ test('desktop setup persists, loads the dashboard and releases its server on exi
     page = await app.firstWindow({ timeout: 15000 });
     await expect(page).toHaveURL(`http://127.0.0.1:${port}/`);
     await expect(page.locator('#groupGame')).toBeAttached();
+    await expect(page.locator('#browserAlias option')).toHaveText(['DesktopTestUser (DesktopTestUser)']);
     await page.getByRole('button', { name: 'Configurações Roblox', exact: true }).click();
     await expect(page.locator('#rbFps')).toHaveValue('144');
     await page.getByRole('button', { name: 'Agentes', exact: true }).click();
