@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
-export interface Logger { info(event: string, fields?: Record<string, unknown>): void; error(event: string, fields?: Record<string, unknown>): void }
+export interface Logger { info(event: string, fields?: Record<string, unknown>): void; warn?(event: string, fields?: Record<string, unknown>): void; error(event: string, fields?: Record<string, unknown>): void }
 export class RotatingLogger implements Logger {
   private path: string;
   constructor(directory: string, private maxBytes = 50 * 1024 * 1024) {
@@ -17,5 +17,6 @@ export class RotatingLogger implements Logger {
     appendFileSync(this.path, line, { encoding: 'utf8', mode: 0o600 });
   }
   info(event: string, fields?: Record<string, unknown>): void { this.write('info', event, fields); }
+  warn(event: string, fields?: Record<string, unknown>): void { this.write('warn', event, fields); }
   error(event: string, fields?: Record<string, unknown>): void { this.write('error', event, fields); }
 }
