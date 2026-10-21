@@ -12,7 +12,7 @@ import { AutoConnector, LocalMcpServer, RealConnectionClient, writeBootstrap } f
 import { inspectSetup } from './setup-check.js';
 import { RobloxSettings } from './roblox-settings.js';
 import { PasswordStore } from './password-store.js';
-import { loadRobloxLoginOptions, RobloxBrowserLogin, RobloxLogin } from './roblox-login.js';
+import { loadRobloxLoginOptions, RobloxBrowserLogin, RobloxLogin, CaptchaSolver } from './roblox-login.js';
 
 export type RunningApplication = {
   url: string;
@@ -28,7 +28,11 @@ export async function startApplication(env = process.env): Promise<RunningApplic
   const direct = new DirectRobloxClient(config.directAccountsFile, undefined, true, config.directHelperFile);
   const launcher = config.launchBackend === 'direct' ? direct : ram;
   const accountRegistry = new AccountRegistry(config.accountsFile, config.accounts);
-  const browserLogin = new RobloxBrowserLogin(undefined, undefined, loadRobloxLoginOptions(env).proxy);
+  const browserLogin = new RobloxBrowserLogin(undefined, undefined, loadRobloxLoginOptions(env).proxy,
+    new CaptchaSolver({
+      capsolverApiKey: env.CAPSOLVER_API_KEY?.trim(),
+      twocaptchaApiKey: env.TWOCAPTCHA_API_KEY?.trim(),
+    }, log));
   const passwords = new PasswordStore(`${config.directAccountsFile}.passwords`);
   const robloxLogin = new RobloxLogin(config.accounts, accountRegistry, launcher, log, browserLogin, passwords);
   const pipeline = new Pipeline(store, launcher, mcp, config.accounts, config.authorized, log, Date.now,
