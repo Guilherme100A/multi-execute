@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Central Roblox login module with captcha solver integrated.
  *
  * Edit this file to change the isolated Edge window, username prefill, optional
@@ -27,6 +27,39 @@ export interface CaptchaSolveResult {
   token?: string;
   method: 'api' | 'manual' | 'none-required';
   elapsedMs: number;
+  /**
+   * Why an API attempt did not produce a usable token. Present whenever the
+   * solver fell through to the operator, so a silent manual fallback is no
+   * longer indistinguishable from a solver that never ran.
+   */
+  failure?: CaptchaFailure;
+}
+
+/** Machine-readable reason an API solve did not complete. */
+export type CaptchaFailureCode =
+  | 'no-api-key'          // nenhuma chave configurada
+  | 'zero-balance'        // conta sem saldo
+  | 'invalid-key'         // chave recusada
+  | 'unsupported-type'    // provedor nao cobre esse tipo de captcha
+  | 'missing-params'      // pkey/blob nao extraidos da pagina
+  | 'timeout'             // provedor nao devolveu a tempo
+  | 'provider-error'      // qualquer outro erro do provedor
+  | 'network';            // falha de transporte
+
+export interface CaptchaFailure {
+  code: CaptchaFailureCode;
+  provider: 'capsolver' | 'twocaptcha';
+  /** Texto cru do provedor, para diagnostico. */
+  detail?: string;
+}
+
+/** Credenciais de saida usadas pelo solver, no formato aceito pelos provedores. */
+export interface CaptchaProxy {
+  type: 'http' | 'https' | 'socks4' | 'socks5';
+  address: string;
+  port: number;
+  login?: string;
+  password?: string;
 }
 
 export interface CaptchaSolverConfig {
@@ -38,10 +71,68 @@ export interface CaptchaSolverConfig {
   pollIntervalMs?: number;
   /** Whether to fall back to manual operator solve if API fails. */
   fallbackToManual?: boolean;
+  /**
+   * Saida usada pelo solver. Deve ser o MESMO proxy da janela do navegador:
+   * um token resolvido de outro IP costuma ser rejeitado pelo Arkose.
+   * Ausente = ProxyLess (IP do provedor).
+   */
+  proxy?: CaptchaProxy;
 }
 
 const CAPSOLVER_API = 'https://api.capsolver.com';
 const TWOCAPTCHA_API = 'https://2captcha.com';
+
+/**
+ * Interpreta um valor de proxy no formato host:porta ou usuario:senha@host:porta.
+ * Aceita prefixo de esquema (http://, socks5://). Devolve undefined quando vazio.
+ */
+export function parseCaptchaProxy(value: string | undefined): CaptchaProxy | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const scheme = /^(https?|socks[45]):\/\//i.exec(trimmed)?.[1]?.toLowerCase() ?? 'http';
+  const bare = trimmed.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  const at = bare.lastIndexOf('@');
+  const credentials = at >= 0 ? bare.slice(0, at) : undefined;
+  const hostPort = at >= 0 ? bare.slice(at + 1) : bare;
+  const separator = hostPort.lastIndexOf(':');
+  const address = separator >= 0 ? hostPort.slice(0, separator) : '';
+  const port = Number(separator >= 0 ? hostPort.slice(separator + 1) : '');
+  if (!address || !Number.isInteger(port) || port < 1 || port > 65535)
+    throw new Error('CAPTCHA_PROXY deve estar em host:porta ou usuario:senha@host:porta');
+  const [login, password] = credentials !== undefined ? credentials.split(':') : [];
+  const type = (scheme === 'https' ? 'https' : scheme === 'socks4' ? 'socks4' : scheme === 'socks5' ? 'socks5' : 'http') as CaptchaProxy['type'];
+  return { type, address, port, login: login || undefined, password: password ?? undefined };
+}
+
+/**
+ * Classifica a resposta de erro de um provedor. A distincao que importa e
+ * saldo/chave: sem ela o operador ve "captcha nao resolveu" quando o problema
+ * e a conta, nao o codigo.
+ */
+export function classifyProviderError(text: string): { code: CaptchaFailureCode; detail: string } {
+  const raw = text.trim();
+  const upper = raw.toUpperCase();
+  if (/ZERO_BALANCE|INSUFFICIENT|NOT_ENOUGH_BALANCE|NO_BALANCE|BALANCE/.test(upper))
+    return { code: 'zero-balance', detail: raw };
+  if (/INVALID_KEY|ERROR_KEY_DOES_NOT_EXIST|WRONG_KEY|ACCOUNT_SUSPENDED|AUTHENTICATION/.test(upper))
+    return { code: 'invalid-key', detail: raw };
+  if (/UNSUPPORTED|UNKNOWN_TASK|TASK_NOT_SUPPORTED|ERROR_TASK_NOT_SUPPORTED/.test(upper))
+    return { code: 'unsupported-type', detail: raw };
+  if (/TIMEOUT|TIMED_OUT|NOT_READY/.test(upper)) return { code: 'timeout', detail: raw };
+  return { code: 'provider-error', detail: raw };
+}
+
+/** Monta os campos de proxy no formato do provedor; vazio quando ProxyLess. */
+function proxyFields(proxy: CaptchaProxy | undefined): Record<string, string | number> {
+  if (!proxy) return {};
+  return {
+    proxyType: proxy.type,
+    proxyAddress: proxy.address,
+    proxyPort: proxy.port,
+    ...(proxy.login ? { proxyLogin: proxy.login, proxyPassword: proxy.password ?? '' } : {}),
+  };
+}
 
 interface LoginBrowserContext {
   url(): string;
@@ -128,105 +219,122 @@ async function extractCaptchaParams(page: LoginBrowserContext): Promise<{ public
   return { publicKey: publicKey || undefined, siteUrl, blobData: blobData || undefined };
 }
 
-/** Solves via CapSolver API. Returns the solution token. */
+/**
+ * Solves via CapSolver API. Returns the token, or a classified failure.
+ *
+ * O task type acompanha o proxy: com proxy valido vale a variante que aceita
+ * proxyAddress (FunCaptchaTask / AntiTurnstileTask / ReCaptchaV2Task), sem
+ * proxy vale a ProxyLess. Mandar proxy para uma task ProxyLess e recusado.
+ */
 async function solveViaCapSolver(
   config: CaptchaSolverConfig,
   type: CaptchaType,
   params: { publicKey?: string; siteUrl: string; blobData?: string },
   log?: Logger
-): Promise<string | undefined> {
+): Promise<{ token?: string; failure?: CaptchaFailure }> {
   const apiKey = config.capsolverApiKey;
-  if (!apiKey) return undefined;
+  if (!apiKey) return { failure: { code: 'no-api-key', provider: 'capsolver' } };
   const timeout = config.apiTimeoutMs ?? 120_000;
   const pollMs = config.pollIntervalMs ?? 3_000;
   const start = Date.now();
+  const proxy = proxyFields(config.proxy);
+  const suffix = config.proxy ? '' : 'ProxyLess';
 
-  let createPayload: Record<string, unknown>;
+  let task: Record<string, unknown>;
 
   switch (type) {
     case 'arkose-funcaptcha':
-      if (!params.publicKey) return undefined;
-      createPayload = {
-        clientKey: apiKey,
-        task: {
-          type: 'FunCaptchaTaskProxyLess',
-          websiteURL: params.siteUrl,
-          funcaptchaApiJSSubdomain: 'https://roblox-api.arkoselabs.com',
-          data: JSON.stringify({ blob: params.blobData }) 
-        }
+      if (!params.publicKey) return { failure: { code: 'missing-params', provider: 'capsolver', detail: 'pkey do Arkose nao encontrada' } };
+      task = {
+        type: `FunCaptchaTask${suffix}`,
+        websiteURL: params.siteUrl,
+        websitePublicKey: params.publicKey,
+        funcaptchaApiJSSubdomain: 'https://roblox-api.arkoselabs.com',
+        data: JSON.stringify({ blob: params.blobData }),
+        ...proxy
       };
       break;
     case 'cloudflare-turnstile':
-      createPayload = {
-        clientKey: apiKey,
-        task: {
-          type: 'AntiTurnstileTaskProxyLess',
-          websiteURL: params.siteUrl,
-          metadata: { action: 'login' }
-        }
+      task = {
+        type: `AntiTurnstileTask${suffix}`,
+        websiteURL: params.siteUrl,
+        websiteKey: params.publicKey,
+        metadata: { action: 'login' },
+        ...proxy
       };
       break;
     case 'roblox-image-grid':
-      // Roblox's custom captcha requires a screenshot-based approach
-      createPayload = {
-        clientKey: apiKey,
-        task: {
-          type: 'ReCaptchaV2TaskProxyLess', // CapSolver maps Roblox grids to image classification
-          websiteURL: params.siteUrl,
-          websiteKey: params.publicKey || 'roblox-default'
-        }
-      };
-      break;
+      // O grid do Roblox e proprietario; mapear para ReCaptchaV2 nao devolve token
+      // utilizavel. Falha explicita em vez de gastar credito numa tarefa invalida.
+      log?.warn?.('captcha_unsupported_type', { provider: 'capsolver', type });
+      return { failure: { code: 'unsupported-type', provider: 'capsolver', detail: 'grid do Roblox nao e suportado por API' } };
     default:
-      return undefined;
+      return { failure: { code: 'unsupported-type', provider: 'capsolver', detail: `tipo ${type}` } };
   }
 
-  const createRes = await fetch(`${CAPSOLVER_API}/createTask`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(createPayload)
-  });
-  const createJson = await createRes.json() as { errorId?: number; taskId?: string; errorCode?: string };
+  const createPayload = { clientKey: apiKey, task };
+
+  let createJson: { errorId?: number; taskId?: string; errorCode?: string; errorDescription?: string };
+  try {
+    const createRes = await fetch(`${CAPSOLVER_API}/createTask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(createPayload)
+    });
+    createJson = await createRes.json() as typeof createJson;
+  } catch (error) {
+    return { failure: { code: 'network', provider: 'capsolver', detail: String(error) } };
+  }
 
   if (createJson.errorId && createJson.errorId !== 0) {
-    log?.warn?.('captcha_capsolver_create_failed', { error: createJson.errorCode });
-    return undefined;
+    const classified = classifyProviderError(`${createJson.errorCode ?? ''} ${createJson.errorDescription ?? ''}`);
+    log?.warn?.('captcha_capsolver_create_failed', { code: classified.code, error: createJson.errorCode, description: createJson.errorDescription });
+    return { failure: { code: classified.code, provider: 'capsolver', detail: classified.detail } };
   }
   const taskId = createJson.taskId;
-  if (!taskId) return undefined;
+  if (!taskId) return { failure: { code: 'provider-error', provider: 'capsolver', detail: 'createTask sem taskId' } };
 
   // Poll for result
   while (Date.now() - start < timeout) {
     await new Promise(resolve => setTimeout(resolve, pollMs));
-    const statusRes = await fetch(`${CAPSOLVER_API}/getTaskResult`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientKey: apiKey, taskId })
-    });
-    const statusJson = await statusRes.json() as { errorId?: number; status?: string; solution?: { token?: string; gRecaptchaResponse?: string; jsonObject?: { token?: string } } };
+    let statusJson: { errorId?: number; errorCode?: string; errorDescription?: string; status?: string; solution?: { token?: string; gRecaptchaResponse?: string; jsonObject?: { token?: string } } };
+    try {
+      const statusRes = await fetch(`${CAPSOLVER_API}/getTaskResult`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientKey: apiKey, taskId })
+      });
+      statusJson = await statusRes.json() as typeof statusJson;
+    } catch (error) {
+      return { failure: { code: 'network', provider: 'capsolver', detail: String(error) } };
+    }
 
-    if (statusJson.errorId && statusJson.errorId !== 0) return undefined;
+    if (statusJson.errorId && statusJson.errorId !== 0) {
+      const classified = classifyProviderError(`${statusJson.errorCode ?? ''} ${statusJson.errorDescription ?? ''}`);
+      log?.warn?.('captcha_capsolver_result_failed', { code: classified.code, taskId, error: statusJson.errorCode });
+      return { failure: { code: classified.code, provider: 'capsolver', detail: classified.detail } };
+    }
     if (statusJson.status === 'ready') {
       const token = statusJson.solution?.token ?? statusJson.solution?.gRecaptchaResponse ?? statusJson.solution?.jsonObject?.token;
       if (token) {
-        log?.info('captcha_solved_capsolver', { type, taskId });
-        return token;
+        log?.info('captcha_solved_capsolver', { type, taskId, proxied: Boolean(config.proxy) });
+        return { token };
       }
-      return undefined;
+      return { failure: { code: 'provider-error', provider: 'capsolver', detail: 'ready sem token' } };
     }
   }
-  return undefined;
+  return { failure: { code: 'timeout', provider: 'capsolver', detail: `sem token em ${timeout}ms` } };
 }
 
-/** Solves via 2Captcha API. Returns the solution token. */
+/** Solves via 2Captcha API. Returns the token, or a classified failure. */
 async function solveViaTwoCaptcha(
   config: CaptchaSolverConfig,
   type: CaptchaType,
   params: { publicKey?: string; siteUrl: string },
   log?: Logger
-): Promise<string | undefined> {
+): Promise<{ token?: string; failure?: CaptchaFailure }> {
   const apiKey = config.twocaptchaApiKey;
-  if (!apiKey) return undefined;
+  if (!apiKey) return { failure: { code: 'no-api-key', provider: 'twocaptcha' } };
   const timeout = config.apiTimeoutMs ?? 120_000;
   const pollMs = config.pollIntervalMs ?? 5_000;
   const start = Date.now();
@@ -236,7 +344,7 @@ async function solveViaTwoCaptcha(
 
   switch (type) {
     case 'arkose-funcaptcha':
-      if (!params.publicKey) return undefined;
+      if (!params.publicKey) return { failure: { code: 'missing-params', provider: 'twocaptcha', detail: 'pkey do Arkose nao encontrada' } };
       method = 'funcaptcha';
       extraParams = { publickey: params.publicKey, surl: 'https://roblox-api.arkoselabs.com' };
       break;
@@ -244,35 +352,58 @@ async function solveViaTwoCaptcha(
       method = 'turnstile';
       break;
     case 'roblox-image-grid':
-      method = 'userrecaptcha';
-      extraParams = { googlekey: params.publicKey || 'roblox-default' };
-      break;
+      log?.warn?.('captcha_unsupported_type', { provider: 'twocaptcha', type });
+      return { failure: { code: 'unsupported-type', provider: 'twocaptcha', detail: 'grid do Roblox nao e suportado por API' } };
     default:
-      return undefined;
+      return { failure: { code: 'unsupported-type', provider: 'twocaptcha', detail: `tipo ${type}` } };
   }
 
-  // Submit task
-  const submitBody = new URLSearchParams({ key: apiKey, method, json: '1', pageurl: params.siteUrl, ...extraParams });
-  const submitRes = await fetch(`${TWOCAPTCHA_API}/in.php`, { method: 'POST', body: submitBody });
-  const submitJson = await submitRes.json() as { status: number; request: string };
+  // O 2Captcha exige o proxy na submissao; sem ele usa a saida do proprio servico.
+  const proxy = config.proxy;
+  const submitBody = new URLSearchParams({
+    key: apiKey, method, json: '1', pageurl: params.siteUrl, ...extraParams,
+    ...(proxy ? {
+      proxy: `${proxy.address}:${proxy.port}`,
+      proxytype: proxy.type.toUpperCase(),
+      ...(proxy.login ? { proxylogin: proxy.login, proxypassword: proxy.password ?? '' } : {}),
+    } : {})
+  });
+
+  let submitJson: { status: number; request: string };
+  try {
+    const submitRes = await fetch(`${TWOCAPTCHA_API}/in.php`, { method: 'POST', body: submitBody });
+    submitJson = await submitRes.json() as typeof submitJson;
+  } catch (error) {
+    return { failure: { code: 'network', provider: 'twocaptcha', detail: String(error) } };
+  }
   if (submitJson.status !== 1) {
-    log?.warn?.('captcha_2captcha_submit_failed', { error: submitJson.request });
-    return undefined;
+    const classified = classifyProviderError(submitJson.request ?? '');
+    log?.warn?.('captcha_2captcha_submit_failed', { code: classified.code, error: submitJson.request });
+    return { failure: { code: classified.code, provider: 'twocaptcha', detail: classified.detail } };
   }
   const captchaId = submitJson.request;
 
   // Poll for result
   while (Date.now() - start < timeout) {
     await new Promise(resolve => setTimeout(resolve, pollMs));
-    const pollRes = await fetch(`${TWOCAPTCHA_API}/res.php?key=${apiKey}&action=get&json=1&id=${captchaId}`);
-    const pollJson = await pollRes.json() as { status: number; request: string };
-    if (pollJson.status === 1) {
-      log?.info('captcha_solved_2captcha', { type, captchaId });
-      return pollJson.request;
+    let pollJson: { status: number; request: string };
+    try {
+      const pollRes = await fetch(`${TWOCAPTCHA_API}/res.php?key=${apiKey}&action=get&json=1&id=${captchaId}`);
+      pollJson = await pollRes.json() as typeof pollJson;
+    } catch (error) {
+      return { failure: { code: 'network', provider: 'twocaptcha', detail: String(error) } };
     }
-    if (pollJson.request !== 'CAPCHA_NOT_READY') return undefined;
+    if (pollJson.status === 1) {
+      log?.info('captcha_solved_2captcha', { type, captchaId, proxied: Boolean(config.proxy) });
+      return { token: pollJson.request };
+    }
+    if (pollJson.request !== 'CAPCHA_NOT_READY') {
+      const classified = classifyProviderError(pollJson.request ?? '');
+      log?.warn?.('captcha_2captcha_result_failed', { code: classified.code, captchaId, error: pollJson.request });
+      return { failure: { code: classified.code, provider: 'twocaptcha', detail: classified.detail } };
+    }
   }
-  return undefined;
+  return { failure: { code: 'timeout', provider: 'twocaptcha', detail: `sem token em ${timeout}ms` } };
 }
 
 /** Injects a solved token back into the page so the login form can proceed. */
@@ -333,12 +464,27 @@ export class CaptchaSolver {
   constructor(private config: CaptchaSolverConfig, private log?: Logger) {}
 
   loadConfigFromEnv(env: Record<string, string | undefined> = process.env): CaptchaSolverConfig {
+    // CAPTCHA_PROXY tem precedencia sobre o proxy do navegador: o operador pode
+    // querer resolver por outra saida sem mexer na janela.
+    const explicitProxy = parseCaptchaProxy(env.CAPTCHA_PROXY);
     this.config = {
       ...this.config,
       capsolverApiKey: this.config.capsolverApiKey || env.CAPSOLVER_API_KEY?.trim(),
       twocaptchaApiKey: this.config.twocaptchaApiKey || env.TWOCAPTCHA_API_KEY?.trim(),
+      proxy: this.config.proxy ?? explicitProxy,
     };
     return this.config;
+  }
+
+  /**
+   * Herda a saida da janela do navegador. Um token Arkose resolvido de outro IP
+   * costuma ser rejeitado, entao o solver fala pelo mesmo proxy do login.
+   */
+  useBrowserProxy(proxy: BrowserProxy | undefined): void {
+    if (!proxy || this.config.proxy) return;
+    this.config = { ...this.config, proxy: parseCaptchaProxy(proxy.server.includes('://') ? proxy.server : `http://${proxy.server}`) };
+    if (this.config.proxy && proxy.username) this.config.proxy.login = proxy.username;
+    if (this.config.proxy && proxy.password !== undefined) this.config.proxy.password = proxy.password;
   }
 
   hasApiKey(): boolean {
@@ -348,6 +494,11 @@ export class CaptchaSolver {
   /**
    * Detects and solves any captcha present on the current Roblox login page.
    * Tries CapSolver first (faster for Roblox), then 2Captcha, then manual fallback.
+   *
+   * Cada tentativa que falha deixa o motivo em `failure`. Quando o solver cai
+   * para o operador, o resultado diz por que — saldo zerado, chave invalida ou
+   * rede aparecem no evento `captcha_api_exhausted`, em vez de virarem um
+   * fallback silencioso indistinguivel de "nunca tentei".
    */
   async solveIfNeeded(page: LoginBrowserContext, timeoutMs = 3 * 60_000): Promise<CaptchaSolveResult> {
     const start = Date.now();
@@ -359,58 +510,62 @@ export class CaptchaSolver {
     }
 
     if (type === 'none') {
-      return { solved: true, type: 'none', method: 'none-required', elapsedMs: Date.now() - start };
+      return { solved: true, type, method: 'none-required', elapsedMs: Date.now() - start };
     }
 
-    this.log?.info('captcha_detected', { type });
+    this.log?.info('captcha_detected', { type, proxied: Boolean(this.config.proxy) });
 
     const params = await extractCaptchaParams(page);
+    const failures: CaptchaFailure[] = [];
 
-    // Try CapSolver first — best Roblox/Arkose support
-    if (this.config.capsolverApiKey) {
+    // Tenta cada provedor configurado; o primeiro token que a pagina aceita vence.
+    const providers: { provider: CaptchaFailure['provider']; key?: string; solve: () => Promise<{ token?: string; failure?: CaptchaFailure }> }[] = [
+      { provider: 'capsolver', key: this.config.capsolverApiKey, solve: () => solveViaCapSolver(this.config, type, params, this.log) },
+      { provider: 'twocaptcha', key: this.config.twocaptchaApiKey, solve: () => solveViaTwoCaptcha(this.config, type, params, this.log) },
+    ];
+
+    for (const candidate of providers) {
+      if (!candidate.key) continue;
+      let outcome: { token?: string; failure?: CaptchaFailure };
       try {
-        const token = await solveViaCapSolver(this.config, type, params, this.log);
-        if (token) {
-          const injected = await injectCaptchaToken(page, type, token);
-          if (injected) {
-            // Wait for captcha to clear from page
-            const cleared = await waitForManualCaptchaSolve(page, 30_000);
-            if (cleared) {
-              return { solved: true, type, token, method: 'api', elapsedMs: Date.now() - start };
-            }
-          }
-        }
-      } catch (err) {
-        this.log?.warn?.('captcha_capsolver_error', { error: String(err) });
+        outcome = await candidate.solve();
+      } catch (error) {
+        outcome = { failure: { code: 'network', provider: candidate.provider, detail: String(error) } };
+        this.log?.warn?.(`captcha_${candidate.provider}_error`, { error: String(error) });
       }
+      if (!outcome.token) {
+        if (outcome.failure) failures.push(outcome.failure);
+        continue;
+      }
+      const injected = await injectCaptchaToken(page, type, outcome.token);
+      if (!injected) {
+        failures.push({ code: 'provider-error', provider: candidate.provider, detail: 'token nao injetado na pagina' });
+        continue;
+      }
+      // Espera o desafio sair da pagina antes de declarar vitoria.
+      const cleared = await waitForManualCaptchaSolve(page, 30_000);
+      if (cleared) return { solved: true, type, token: outcome.token, method: 'api', elapsedMs: Date.now() - start };
+      failures.push({ code: 'provider-error', provider: candidate.provider, detail: 'desafio continuou na pagina apos injecao' });
     }
 
-    // Try 2Captcha
-    if (this.config.twocaptchaApiKey) {
-      try {
-        const token = await solveViaTwoCaptcha(this.config, type, params, this.log);
-        if (token) {
-          const injected = await injectCaptchaToken(page, type, token);
-          if (injected) {
-            const cleared = await waitForManualCaptchaSolve(page, 30_000);
-            if (cleared) {
-              return { solved: true, type, token, method: 'api', elapsedMs: Date.now() - start };
-            }
-          }
-        }
-      } catch (err) {
-        this.log?.warn?.('captcha_2captcha_error', { error: String(err) });
-      }
+    // Nenhum provedor entregou: registra o motivo exato antes do fallback manual.
+    const primary = failures[0];
+    if (!this.hasApiKey()) {
+      failures.push({ code: 'no-api-key', provider: 'capsolver' });
     }
+    this.log?.warn?.('captcha_api_exhausted', {
+      type,
+      failures: failures.map(entry => ({ code: entry.code, provider: entry.provider, detail: entry.detail })),
+    });
 
     // Manual fallback — operator solves in the visible Edge window
     if (this.config.fallbackToManual !== false) {
-      this.log?.info('captcha_manual_fallback', { type });
+      this.log?.info('captcha_manual_fallback', { type, reason: primary?.code ?? 'api-unavailable' });
       const manualSolved = await waitForManualCaptchaSolve(page, timeoutMs);
-      return { solved: manualSolved, type, method: 'manual', elapsedMs: Date.now() - start };
+      return { solved: manualSolved, type, method: 'manual', elapsedMs: Date.now() - start, failure: primary };
     }
 
-    return { solved: false, type, method: 'api', elapsedMs: Date.now() - start };
+    return { solved: false, type, method: 'api', elapsedMs: Date.now() - start, failure: primary };
   }
 }
 
@@ -449,7 +604,7 @@ async function openEdge(proxy?: BrowserProxy): Promise<Browser> {
 export class RobloxBrowserLogin {
   private active = false;
   constructor(private open: LoginBrowserFactory = openEdge, private timeoutMs = 5 * 60_000, private proxy?: BrowserProxy,
-    private captcha?: CaptchaSolver) {}
+    private captcha?: CaptchaSolver, private log?: Logger) {}
 
   async signIn(username?: string, password?: string): Promise<string> {
     if (this.active) throw new ConflictError('Another Roblox sign-in window is already open');
@@ -483,9 +638,17 @@ export class RobloxBrowserLogin {
       // The captcha challenge only appears on suspicious logins; when it does, the
       // solver resolves it while the session poll below keeps running. Without a
       // configured key the operator solves it in the visible window as before.
+      // O solver herda a saida da janela: token de outro IP costuma ser recusado.
+      this.captcha?.useBrowserProxy(this.proxy);
       const deadline = Date.now() + this.timeoutMs;
       const captchaRun = this.captcha
-        ? this.captcha.solveIfNeeded(page as unknown as LoginBrowserContext, this.timeoutMs).catch(() => undefined)
+        ? this.captcha.solveIfNeeded(page as unknown as LoginBrowserContext, this.timeoutMs)
+            .then(result => {
+              if (result.method === 'manual' && result.failure)
+                this.log?.warn?.('captcha_unresolved_by_api', { code: result.failure.code, provider: result.failure.provider, detail: result.failure.detail });
+              return result;
+            })
+            .catch(error => { this.log?.error('captcha_solver_error', { error: String(error) }); return undefined; })
         : Promise.resolve(undefined);
 
       while (Date.now() < deadline && browser.isConnected() && !page.isClosed()) {

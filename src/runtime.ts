@@ -28,11 +28,12 @@ export async function startApplication(env = process.env): Promise<RunningApplic
   const direct = new DirectRobloxClient(config.directAccountsFile, undefined, true, config.directHelperFile);
   const launcher = config.launchBackend === 'direct' ? direct : ram;
   const accountRegistry = new AccountRegistry(config.accountsFile, config.accounts);
-  const browserLogin = new RobloxBrowserLogin(undefined, undefined, loadRobloxLoginOptions(env).proxy,
-    new CaptchaSolver({
-      capsolverApiKey: env.CAPSOLVER_API_KEY?.trim(),
-      twocaptchaApiKey: env.TWOCAPTCHA_API_KEY?.trim(),
-    }, log));
+  // O solver nasce com as chaves do ambiente; o proxy da janela entra no sign-in.
+  const captchaSolver = new CaptchaSolver({
+    capsolverApiKey: env.CAPSOLVER_API_KEY?.trim(),
+    twocaptchaApiKey: env.TWOCAPTCHA_API_KEY?.trim(),
+  }, log).loadConfigFromEnv(env) as CaptchaSolver;
+  const browserLogin = new RobloxBrowserLogin(undefined, undefined, loadRobloxLoginOptions(env).proxy, captchaSolver, log);
   const passwords = new PasswordStore(`${config.directAccountsFile}.passwords`);
   const robloxLogin = new RobloxLogin(config.accounts, accountRegistry, launcher, log, browserLogin, passwords);
   const pipeline = new Pipeline(store, launcher, mcp, config.accounts, config.authorized, log, Date.now,
