@@ -19,6 +19,7 @@
     "package:win": "npm run build && electron-builder --win nsis portable",
     "package:dir": "npm run build && electron-builder --dir",
     "batch": "tsx --env-file-if-exists=.env src/batch.ts",
+    "check:proxy": "tsx --env-file-if-exists=.env src/check-proxy.ts",
     "setup:real": "tsx --env-file-if-exists=.env src/setup-real.ts",
     "import:ram": "tsx --env-file-if-exists=.env src/import-ram.ts",
     "test": "tsx --test test/*.test.ts",

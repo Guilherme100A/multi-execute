@@ -72,8 +72,14 @@ export interface CaptchaSolverConfig {
   /** Whether to fall back to manual operator solve if API fails. */
   fallbackToManual?: boolean;
   /**
-   * Saida usada pelo solver. Deve ser o MESMO proxy da janela do navegador:
-   * um token resolvido de outro IP costuma ser rejeitado pelo Arkose.
+   * Saida usada pelo solver. Recomendado usar o MESMO proxy da janela.
+   *
+   * Isso e uma heuristica de consistencia, NAO um requisito documentado: o
+   * schema do Arkose Verify v4 exige apenas private_key + session_token e nao
+   * carrega IP (developer.arkoselabs.com/docs/verify-request-and-response-schemas),
+   * e nem o 2Captcha nem a CapSolver exigem proxy para FunCaptcha. O que o Arkose
+   * documenta e IP como sinal de risco (velocidade por IP, allow/denylists em
+   * developer.arkoselabs.com/docs/ip-velocity-fields) — dai a consistencia ajudar.
    * Ausente = ProxyLess (IP do provedor).
    */
   proxy?: CaptchaProxy;
@@ -244,16 +250,13 @@ async function solveViaCapSolver(
 
   switch (type) {
     case 'arkose-funcaptcha':
+      // A CapSolver NAO lista mais task de FunCaptcha/Arkose em
+      // docs.capsolver.com/en/guide/api-tasktype (verificado 2026-10): a doc
+      // antiga responde 404. Chamar FunCaptchaTask aqui so devolve erro de
+      // task desconhecida e ainda consome saldo. Falha antes da requisicao.
       if (!params.publicKey) return { failure: { code: 'missing-params', provider: 'capsolver', detail: 'pkey do Arkose nao encontrada' } };
-      task = {
-        type: `FunCaptchaTask${suffix}`,
-        websiteURL: params.siteUrl,
-        websitePublicKey: params.publicKey,
-        funcaptchaApiJSSubdomain: 'https://roblox-api.arkoselabs.com',
-        data: JSON.stringify({ blob: params.blobData }),
-        ...proxy
-      };
-      break;
+      log?.warn?.('captcha_unsupported_type', { provider: 'capsolver', type, detail: 'FunCaptcha descontinuado pela CapSolver' });
+      return { failure: { code: 'unsupported-type', provider: 'capsolver', detail: 'CapSolver nao oferece mais task de Arkose/FunCaptcha; use 2Captcha' } };
     case 'cloudflare-turnstile':
       task = {
         type: `AntiTurnstileTask${suffix}`,
@@ -477,8 +480,9 @@ export class CaptchaSolver {
   }
 
   /**
-   * Herda a saida da janela do navegador. Um token Arkose resolvido de outro IP
-   * costuma ser rejeitado, entao o solver fala pelo mesmo proxy do login.
+   * Herda a saida da janela do navegador, para o token sair do mesmo IP que
+   * faz o login. Heuristica de consistencia: o Arkose trata IP como sinal de
+   * risco, mas nao ha vinculo de IP documentado no schema do Verify.
    */
   useBrowserProxy(proxy: BrowserProxy | undefined): void {
     if (!proxy || this.config.proxy) return;
@@ -519,10 +523,14 @@ export class CaptchaSolver {
     const failures: CaptchaFailure[] = [];
 
     // Tenta cada provedor configurado; o primeiro token que a pagina aceita vence.
-    const providers: { provider: CaptchaFailure['provider']; key?: string; solve: () => Promise<{ token?: string; failure?: CaptchaFailure }> }[] = [
-      { provider: 'capsolver', key: this.config.capsolverApiKey, solve: () => solveViaCapSolver(this.config, type, params, this.log) },
-      { provider: 'twocaptcha', key: this.config.twocaptchaApiKey, solve: () => solveViaTwoCaptcha(this.config, type, params, this.log) },
-    ];
+    // A ordem importa para Arkose: a CapSolver removeu o suporte a FunCaptcha
+    // (verificado 2026-10 em docs.capsolver.com/en/guide/api-tasktype), entao o
+    // unico provedor que ainda resolve Roblox e o 2Captcha.
+    const arkose = type === 'arkose-funcaptcha';
+    const order: CaptchaFailure['provider'][] = arkose ? ['twocaptcha', 'capsolver'] : ['capsolver', 'twocaptcha'];
+    const providers = order.map(provider => provider === 'capsolver'
+      ? { provider, key: this.config.capsolverApiKey, solve: () => solveViaCapSolver(this.config, type, params, this.log) }
+      : { provider, key: this.config.twocaptchaApiKey, solve: () => solveViaTwoCaptcha(this.config, type, params, this.log) });
 
     for (const candidate of providers) {
       if (!candidate.key) continue;
@@ -603,15 +611,41 @@ async function openEdge(proxy?: BrowserProxy): Promise<Browser> {
 /** Captures only the session created after the operator completes the official login. */
 export class RobloxBrowserLogin {
   private active = false;
+  /** Resolve o proxy da conta; ausente = usa o proxy unico de `proxy`. */
+  private resolveProxy?: (alias: string) => BrowserProxy | undefined;
   constructor(private open: LoginBrowserFactory = openEdge, private timeoutMs = 5 * 60_000, private proxy?: BrowserProxy,
     private captcha?: CaptchaSolver, private log?: Logger) {}
 
-  async signIn(username?: string, password?: string): Promise<string> {
+  /**
+   * Liga o pool de proxies: cada conta passa a sair pelo seu proprio IP sticky.
+   * Sem isso o login usa `proxy` (unico) ou a conexao direta.
+   */
+  useProxyPool(resolve: (alias: string) => BrowserProxy | undefined): void {
+    this.resolveProxy = resolve;
+  }
+
+  /** Confere e registra o IP de saida do proxy; nunca derruba o login por isso. */
+  private async logProxyEgress(proxy: BrowserProxy | undefined): Promise<void> {
+    if (!proxy || !this.log) return;
+    const { checkProxy } = await import('./proxy-check.js');
+    const result = await checkProxy(proxy);
+    this.log.info('proxy_egress_checked', {
+      ok: result.ok, egress_ip: result.egressIp, country: result.country,
+      org: result.org, datacenter: result.datacenter, elapsed_ms: result.elapsedMs, error: result.error,
+    });
+  }
+
+  async signIn(username?: string, password?: string, alias?: string): Promise<string> {
     if (this.active) throw new ConflictError('Another Roblox sign-in window is already open');
     this.active = true;
     let browser: LoginBrowser | undefined;
+    // O pool tem prioridade: cada conta sai pelo seu proprio IP sticky.
+    const proxy = (alias ? this.resolveProxy?.(alias) : undefined) ?? this.proxy;
     try {
-      browser = await this.open(this.proxy);
+      // Loga a saida antes de abrir a janela: quando o login falha, saber se o
+      // proxy saiu por IP residencial ou por datacenter e a primeira pergunta.
+      this.logProxyEgress(proxy).catch(() => {});
+      browser = await this.open(proxy);
       const page = await browser.newPage();
       await page.bringToFront();
       let navigationError: unknown;
@@ -638,8 +672,9 @@ export class RobloxBrowserLogin {
       // The captcha challenge only appears on suspicious logins; when it does, the
       // solver resolves it while the session poll below keeps running. Without a
       // configured key the operator solves it in the visible window as before.
-      // O solver herda a saida da janela: token de outro IP costuma ser recusado.
-      this.captcha?.useBrowserProxy(this.proxy);
+      // O solver herda a saida DESTA conta: o Arkose pode comparar o IP que
+      // resolveu o captcha com o IP que submete o login.
+      this.captcha?.useBrowserProxy(proxy);
       const deadline = Date.now() + this.timeoutMs;
       const captchaRun = this.captcha
         ? this.captcha.solveIfNeeded(page as unknown as LoginBrowserContext, this.timeoutMs)
@@ -693,7 +728,7 @@ export class RobloxLogin {
     if (!configured) throw new InputError('Account alias is not configured');
     const before = await this.local.accounts();
     const password = await this.passwords?.get(configured.robloxUsername);
-    const cookie = await this.browser.signIn(configured.robloxUsername, password);
+    const cookie = await this.browser.signIn(configured.robloxUsername, password, alias);
     await this.local.importCookie(cookie);
     const after = await this.local.accounts();
     const previous = new Set(before.map(value => value.toLowerCase()));

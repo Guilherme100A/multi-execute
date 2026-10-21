@@ -13,6 +13,7 @@ import { inspectSetup } from './setup-check.js';
 import { RobloxSettings } from './roblox-settings.js';
 import { PasswordStore } from './password-store.js';
 import { loadRobloxLoginOptions, RobloxBrowserLogin, RobloxLogin, CaptchaSolver } from './roblox-login.js';
+import { loadProxyPool, proxyForAccount } from './proxy-pool.js';
 
 export type RunningApplication = {
   url: string;
@@ -34,6 +35,13 @@ export async function startApplication(env = process.env): Promise<RunningApplic
     twocaptchaApiKey: env.TWOCAPTCHA_API_KEY?.trim(),
   }, log).loadConfigFromEnv(env) as CaptchaSolver;
   const browserLogin = new RobloxBrowserLogin(undefined, undefined, loadRobloxLoginOptions(env).proxy, captchaSolver, log);
+  // Pool de proxies (opcional): cada conta sai pelo seu proprio IP sticky.
+  // Sem PROXY_HOST o login segue usando o proxy unico ou a conexao direta.
+  const pool = loadProxyPool(env);
+  if (pool) {
+    browserLogin.useProxyPool(alias => proxyForAccount(pool, alias));
+    log.info('proxy_pool_enabled', { host: pool.host, port: pool.port, country: pool.country, ttl: pool.ttl });
+  }
   const passwords = new PasswordStore(`${config.directAccountsFile}.passwords`);
   const robloxLogin = new RobloxLogin(config.accounts, accountRegistry, launcher, log, browserLogin, passwords);
   const pipeline = new Pipeline(store, launcher, mcp, config.accounts, config.authorized, log, Date.now,
